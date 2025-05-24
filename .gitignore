@@ -18,10 +18,14 @@ data/*.db
 logs/*.log
 *.log
 *.db
+viper.db*
 test_imports.py
 fix_database_issue.py
 test_db_save.py
 check_db_path.py
+test_database_save.py
+DATABASE_TROUBLESHOOTING.md
+
 # System files
 .DS_Store
 Thumbs.db

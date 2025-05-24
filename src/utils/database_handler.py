@@ -950,7 +950,8 @@ def get_cve_details(cve_id: str) -> Optional[Dict[str, Any]]:
         SELECT cve_id, description, cvss_v3_score, published_date, gemini_priority,
                processed_at, epss_score, epss_percentile, is_in_kev, kev_date_added,
                risk_score, alerts, msrc_id, microsoft_product_family, microsoft_product_name,
-               microsoft_severity, patch_tuesday_date, has_public_exploit, exploit_references
+               microsoft_severity, patch_tuesday_date, has_public_exploit, exploit_references,
+               gemini_raw_response
         FROM cves
         WHERE cve_id = ?
         """,
@@ -975,10 +976,15 @@ def get_cve_details(cve_id: str) -> Optional[Dict[str, Any]]:
 
         # Extract references if stored as JSON
         references = []
-        if row["gemini_raw_response"]:
+        try:
+            gemini_raw_response = row["gemini_raw_response"] if row["gemini_raw_response"] else None
+        except (KeyError, IndexError):
+            gemini_raw_response = None
+
+        if gemini_raw_response:
             try:
                 # Try to extract references from the Gemini response
-                gemini_data = json.loads(row["gemini_raw_response"])
+                gemini_data = json.loads(gemini_raw_response)
                 if "references" in gemini_data:
                     references = gemini_data["references"]
             except (json.JSONDecodeError, TypeError):
@@ -987,9 +993,9 @@ def get_cve_details(cve_id: str) -> Optional[Dict[str, Any]]:
 
         # Extract CPE entries if stored in Gemini response
         cpe_entries = []
-        if row["gemini_raw_response"]:
+        if gemini_raw_response:
             try:
-                gemini_data = json.loads(row["gemini_raw_response"])
+                gemini_data = json.loads(gemini_raw_response)
                 if "cpe_entries" in gemini_data:
                     cpe_entries = gemini_data["cpe_entries"]
             except (json.JSONDecodeError, TypeError):
@@ -1096,7 +1102,11 @@ def store_or_update_cve(cve_data):
                 return False
 
         # Connect to database with timeout and isolation level settings
-        conn = sqlite3.connect(abs_db_path, timeout=20.0, isolation_level="EXCLUSIVE")
+        conn = sqlite3.connect(abs_db_path, timeout=30.0)
+        # Set WAL mode for better concurrent access
+        conn.execute("PRAGMA journal_mode=WAL")
+        # Set immediate locking for consistency but not exclusive
+        conn.execute("PRAGMA locking_mode=NORMAL")
         cursor = conn.cursor()
 
         # Check if the CVE already exists
@@ -1318,10 +1328,16 @@ def store_or_update_cve(cve_data):
             log_to_file(f"Insert affected {affected_rows} rows")
 
         # Commit transaction
-        conn.commit()
-        log_to_file(f"Transaction committed for {cve_id}")
+        log_to_file(f"About to commit transaction for {cve_id}")
+        try:
+            conn.commit()
+            log_to_file(f"Transaction committed successfully for {cve_id}")
+        except Exception as commit_error:
+            log_to_file(f"Commit failed for {cve_id}: {str(commit_error)}")
+            raise
 
         # Verify the operation
+        log_to_file(f"Starting verification for {cve_id}")
         cursor.execute("SELECT cve_id, processed_at FROM cves WHERE cve_id = ?", (cve_id,))
         verification = cursor.fetchone()
         if verification:
@@ -1329,6 +1345,10 @@ def store_or_update_cve(cve_data):
             return True
         else:
             log_to_file(f"Verification failed: CVE {cve_id} not found after save operation")
+            # Let's also check if any records exist at all
+            cursor.execute("SELECT COUNT(*) FROM cves")
+            total_count = cursor.fetchone()[0]
+            log_to_file(f"Total CVEs in database: {total_count}")
             return False
 
     except sqlite3.Error as e:
