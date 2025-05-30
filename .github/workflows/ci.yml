@@ -56,6 +56,11 @@ jobs:
         # Run the tests
         pytest tests/unit/test_config.py::test_get_gemini_model_name_returns_string tests/unit/test_config.py::test_get_gemini_model_name_uses_env_var
 
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+
   build-and-push:
     needs: test
     runs-on: ubuntu-latest
