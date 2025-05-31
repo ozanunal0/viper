@@ -83,20 +83,19 @@ VIPER now includes a **Model Context Protocol (MCP) server** that integrates sea
    }
    ```
 
-2. **See the [Configuration Guide](CONFIGURATION_GUIDE.md)** for complete setup instructions
+2. **See the [MCP Server Readme](docs/MCP_SERVER_README.md)** for complete setup instructions
 
 ## 📚 Documentation
 
 📖 **Complete documentation is available in the [docs/](docs/) directory:**
 
-- **[Configuration Guide](CONFIGURATION_GUIDE.md)** - MCP server setup and environment configuration
 - **[Getting Started Guide](docs/MCP_SERVER_README.md)** - MCP server setup and configuration
 - **[Technical Implementation](docs/MCP_IMPLEMENTATION_SUMMARY.md)** - Comprehensive technical overview
 - **[Development Guide](docs/DEVELOPMENT.md)** - Development setup and contribution guidelines
 - **[Database Troubleshooting](docs/DATABASE_TROUBLESHOOTING.md)** - Database configuration and common issues
 - **[Docker Deployment](docs/DOCKER.md)** - Containerization and deployment instructions
 
-👉 **Start here:** [docs/README.md](docs/README.md) for complete navigation
+👉 **Start here:** [README.md](README.md) for complete navigation
 
 ## 📋 Table of Contents
 

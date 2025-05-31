@@ -53,7 +53,7 @@ A **simplified MCP server** that:
 ```
 ┌─────────────────────────────────────────────┐
 │              MCP Client                     │
-│         (Claude, AI Assistant)             │
+│         (Claude, AI Assistant)              │
 └─────────────────┬───────────────────────────┘
                   │ JSON-RPC over stdio
                   │
@@ -61,20 +61,20 @@ A **simplified MCP server** that:
 │           ViperMCPServer                    │
 │  ┌─────────────────────────────────────┐    │
 │  │         MCP Tools                   │    │
-│  │  • get_gemini_cve_priority         │    │
-│  │  • get_gemini_cve_analysis         │    │
-│  │  • get_viper_risk_score            │    │
-│  │  • get_viper_cve_alerts            │    │
-│  │  • get_comprehensive_cve_analysis  │    │
+│  │  • get_gemini_cve_priority          │    │
+│  │  • get_gemini_cve_analysis          │    │
+│  │  • get_viper_risk_score             │    │
+│  │  • get_viper_cve_alerts             │    │
+│  │  • get_comprehensive_cve_analysis   │    │
 │  └─────────────────────────────────────┘    │
 └─────────────────┬───────────────────────────┘
                   │ Async calls
                   │
 ┌─────────────────▼───────────────────────────┐
-│         Viper Core Functions               │
+│         Viper Core Functions                │
 │  ┌─────────────────┐ ┌─────────────────┐    │
 │  │ gemini_analyzer │ │ risk_analyzer   │    │
-│  │  • AI analysis │ │ • Risk scoring  │    │
+│  │  • AI analysis  │ │ • Risk scoring  │    │
 │  │  • Priority     │ │ • Alert rules   │    │
 │  └─────────────────┘ └─────────────────┘    │
 └─────────────────────────────────────────────┘
