@@ -10,6 +10,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 from src.utils.config import (
     get_nvd_api_base_url,
+    get_nvd_api_key,
     get_nvd_pagination_delay,
     get_nvd_results_per_page,
     get_retry_max_attempts,
@@ -54,7 +55,13 @@ def _fetch_from_nvd_api(params):
     Raises:
         requests.exceptions.HTTPError: If the HTTP request returns an unsuccessful status code.
     """
-    response = requests.get(get_nvd_api_base_url(), params=params)
+    # Set up headers with API key if available
+    headers = {}
+    api_key = get_nvd_api_key()
+    if api_key:
+        headers["apiKey"] = api_key
+
+    response = requests.get(get_nvd_api_base_url(), params=params, headers=headers)
 
     # Raise for status to trigger retry on HTTP errors
     response.raise_for_status()

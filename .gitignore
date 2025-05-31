@@ -26,7 +26,7 @@ check_db_path.py
 test_database_save.py
 DATABASE_TROUBLESHOOTING.md
 .coverage
-coverage.xml
+commit_message.txt
 
 # System files
 .DS_Store
