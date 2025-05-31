@@ -615,20 +615,40 @@ def get_exploit_search_max_results():
 
 def get_public_exploit_boost_factor():
     """
-    Retrieves the boost factor for risk scoring when a public exploit is available.
-    Defaults to 0.15 if not specified or invalid.
+    Retrieves the boost factor for CVEs with public exploits.
+    This multiplier is applied to the risk score when public exploits are available.
+    Defaults to 1.5 if not specified or invalid.
 
     Returns:
-        float: The boost factor (0.0 to 1.0)
+        float: Boost factor for public exploits
     """
-    factor = os.getenv("PUBLIC_EXPLOIT_BOOST_FACTOR", "")
+    boost_factor = os.getenv("PUBLIC_EXPLOIT_BOOST_FACTOR", "")
 
     try:
-        value = float(factor)
-        if not 0 <= value <= 1:
-            raise ValueError("Value must be between 0 and 1")
+        value = float(boost_factor)
+        if value <= 0:
+            raise ValueError("Value must be positive")
         return value
     except (ValueError, TypeError):
-        default = 0.15
+        default = 1.5
         logger.warning(f"Invalid or missing PUBLIC_EXPLOIT_BOOST_FACTOR value. Using default: {default}")
         return default
+
+
+def get_nvd_api_key():
+    """
+    Retrieves the NVD API key from environment variables.
+    API key is optional for basic NVD requests but recommended for higher rate limits.
+    Returns None if not configured.
+
+    Returns:
+        str or None: The NVD API key if configured, None otherwise
+    """
+    api_key = os.getenv("NVD_API_KEY", "")
+
+    if not api_key:
+        logger.info("NVD_API_KEY not found in environment variables. Using public rate limits.")
+        return None
+
+    logger.info("NVD API key found - using authenticated requests for higher rate limits")
+    return api_key
