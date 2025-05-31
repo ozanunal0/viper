@@ -42,7 +42,7 @@ VIPER now includes a **Model Context Protocol (MCP) server** that integrates sea
 
 ### **📺 Demo**
 
-![demo.gif](public/demo.gif)
+![demo.gif](https://i.imgur.com/arWoEme.gif)
 
 ### **🔧 Available MCP Tools:**
 
