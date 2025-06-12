@@ -1,144 +1,102 @@
-# Running VIPER in Docker
+# Docker Deployment
 
-This document explains how to run the VIPER Vulnerability Intelligence Platform using Docker.
+## Quick Start
 
-## Prerequisites
-
-- Docker installed on your system
-- Docker Compose installed on your system
-
-## Setup
-
-1. Copy the example environment file and set your API keys:
-
+### Build & Run
 ```bash
-cp .env.example .env
+# Build image
+docker build -t viper .
+
+# Run with environment
+docker run -d \
+  -p 8501:8501 \
+  -v $(pwd)/data:/app/data \
+  -e GEMINI_API_KEY=your_key_here \
+  viper
 ```
 
-2. Edit the `.env` file to add your API keys:
-   - `GEMINI_API_KEY`: Your Google Gemini API key
-   - `GITHUB_TOKEN`: Your GitHub personal access token
-   - Other configuration as needed
-
-## Running with Docker Compose
-
-1. Build the application:
-
+### Docker Compose
 ```bash
-docker-compose build
-```
-
-2. Start the application:
-
-```bash
+# Start services
 docker-compose up -d
-```
 
-3. Access the VIPER dashboard at: http://localhost:8501
-
-4. Stop the application:
-
-```bash
+# Stop services
 docker-compose down
 ```
 
-## Data Persistence
+## Configuration
 
-The Docker setup includes a volume mount for the `/app/data` directory, which stores:
-
-- SQLite database containing vulnerability data
-- Any other persisted data
-
-The data will be stored in the `./data` directory on your host machine.
-
-### Database Path Configuration
-
-It's important to understand how database paths work in the Docker environment:
-
-- Inside the container: The database is located at `/app/data/threat_intel_gemini_mvp.db`
-- On your host machine: The same file is at `./data/threat_intel_gemini_mvp.db` (relative to where you run docker-compose)
-
-This is configured in two places:
-
-1. `docker-compose.yml`: Sets the environment variable `DB_FILE_NAME=/app/data/threat_intel_gemini_mvp.db`
-2. Volume mapping: `-./data:/app/data` makes these paths point to the same files
-
-If you need to run VIPER both inside Docker and directly on your host, be aware that your local `.env` configuration might use a different path. For local development without Docker, consider using `DB_FILE_NAME=data/threat_intel_gemini_mvp.db` (a relative path).
-
-## Database Management
-
-VIPER is designed to automatically handle common database issues like duplicate columns during initialization.
-
-### Database Troubleshooting
-
-If you encounter database issues, you have these options:
-
-1. **Database Reset:**
-
-   If you need to completely reset your database:
-
-   ```bash
-   docker exec -it viper python scripts/reset_database.py
-   ```
-
-2. **Remove Volume and Restart:**
-
-   As a last resort, you can remove the data volume and restart:
-
-   ```bash
-   docker-compose down -v
-   docker-compose up -d
-   ```
-
-### Common Database Errors
-
-**Error: "duplicate column name: risk_score"**
-
-This error occurs when the application tries to add columns that already exist. Recent updates have improved handling of this issue by automatically detecting and skipping duplicate columns. The application will continue normally even if this warning appears during initialization.
-
-## Environment Variables
-
-You can customize the application by setting environment variables in the `.env` file or directly in the `docker-compose.yml` file.
-
-Key variables:
-
-| Variable | Description |
-|----------|-------------|
-| `GEMINI_API_KEY` | Google Gemini API key for AI analysis |
-| `GITHUB_TOKEN` | GitHub token for searching exploit repositories |
-| `DB_FILE_NAME` | Path to the SQLite database file |
-| `LOG_LEVEL` | Logging level (INFO, DEBUG, etc.) |
-
-## Building the Image Manually
-
-If you need to build the Docker image manually:
-
+### Environment Variables
 ```bash
-docker build -t viper-app .
+# Required
+GEMINI_API_KEY=your_gemini_api_key
+
+# Optional
+GITHUB_TOKEN=your_github_token
+NVD_API_KEY=your_nvd_api_key
 ```
 
-Then run it:
+### Volume Mounts
+- `./data:/app/data` - Database persistence
+- `./logs:/app/logs` - Log files
 
-```bash
-docker run -p 8501:8501 -v ./data:/app/data viper-app
+## Docker Compose Configuration
+
+```yaml
+services:
+  viper:
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
 ```
 
 ## Troubleshooting
 
-1. If you can't access the app, check if it's running:
+**Common Issues:**
 
+- **Port conflicts**: Change `8501:8501` to `8502:8501`
+- **Database errors**: Ensure `./data` directory exists
+- **Permission issues**: Check volume mount permissions
+- **API errors**: Verify environment variables
+
+**Check logs:**
 ```bash
-docker ps
+docker logs <container_id>
 ```
 
-2. Check application logs:
-
+**Shell access:**
 ```bash
-docker-compose logs viper-app
+docker exec -it <container_id> /bin/bash
 ```
 
-3. If you're having database issues, check the volume permissions:
+## Production Deployment
 
+### Recommended Setup
+```yaml
+services:
+  viper:
+    image: viper:latest
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    volumes:
+      - viper_data:/app/data
+      - viper_logs:/app/logs
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+
+volumes:
+  viper_data:
+  viper_logs:
+```
+
+### Health Check
 ```bash
-ls -la ./data
+curl http://localhost:8501/healthz
 ```

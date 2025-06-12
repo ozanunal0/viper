@@ -652,3 +652,80 @@ def get_nvd_api_key():
 
     logger.info("NVD API key found - using authenticated requests for higher rate limits")
     return api_key
+
+
+def get_exa_api_key():
+    """
+    Retrieves the EXA AI API key from environment variables.
+
+    Returns:
+        str: The EXA AI API key
+
+    Raises:
+        ValueError: If the API key is not found in environment variables
+    """
+    api_key = os.getenv("EXA_API_KEY")
+
+    if not api_key:
+        logger.error("EXA_API_KEY not found in environment variables")
+        raise ValueError("EXA_API_KEY not found. Please add it to your .env file")
+
+    return api_key
+
+
+def get_exa_results_per_query():
+    """
+    Retrieves the number of results to fetch per EXA search query.
+    Defaults to 5 if not specified or invalid.
+
+    Returns:
+        int: Number of results per EXA query
+    """
+    results_per_query = os.getenv("EXA_RESULTS_PER_QUERY", "")
+
+    try:
+        value = int(results_per_query)
+        if value <= 0:
+            raise ValueError("Value must be positive")
+        return value
+    except (ValueError, TypeError):
+        default = 5
+        logger.warning(f"Invalid or missing EXA_RESULTS_PER_QUERY value. Using default: {default}")
+        return default
+
+
+def get_exa_general_queries():
+    """
+    Retrieves the list of general threat intelligence queries for EXA searches.
+    Returns a default list if not specified.
+
+    Returns:
+        list: List of general queries to search for
+    """
+    queries_str = os.getenv("EXA_GENERAL_QUERIES", "")
+
+    if not queries_str:
+        default = [
+            "latest ransomware TTPs and techniques",
+            "new phishing campaigns targeting financial sector",
+            "recent APT group activities and campaigns",
+            "zero-day vulnerability exploitation trends",
+            "emerging cybersecurity threats and IOCs",
+        ]
+        logger.info("EXA_GENERAL_QUERIES not found. Using default queries")
+        return default
+
+    try:
+        # Parse comma-separated queries
+        queries = [query.strip() for query in queries_str.split(",") if query.strip()]
+        return queries if queries else []
+    except Exception:
+        default = [
+            "latest ransomware TTPs and techniques",
+            "new phishing campaigns targeting financial sector",
+            "recent APT group activities and campaigns",
+            "zero-day vulnerability exploitation trends",
+            "emerging cybersecurity threats and IOCs",
+        ]
+        logger.warning("Error parsing EXA_GENERAL_QUERIES. Using default queries")
+        return default

@@ -27,6 +27,7 @@ test_database_save.py
 DATABASE_TROUBLESHOOTING.md
 .coverage
 commit_message.txt
+.cursor/
 
 # System files
 .DS_Store
