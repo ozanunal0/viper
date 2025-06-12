@@ -1,107 +1,100 @@
-# Development Guide for VIPER CTI Project
+# Development Guide
 
-This document describes the development workflow and tools used in the VIPER CTI project.
+## Quick Start
 
-## Setting Up the Development Environment
-
-1. Create and activate a virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   pip install -r requirements-dev.txt
-   ```
-
-3. Install pre-commit hooks:
-   ```bash
-   pre-commit install
-   ```
-
-## Code Quality Tools
-
-### Linting and Formatting
-
-We use the following tools to ensure code quality:
-
-- **Black**: Code formatter
-  ```bash
-  black .
-  ```
-
-- **isort**: Import statement organizer
-  ```bash
-  isort .
-  ```
-
-- **flake8**: Linting
-  ```bash
-  flake8 .
-  ```
-
-### Running Tests
-
-Tests are written using pytest:
-
+### 1. Clone & Setup
 ```bash
-# Run all tests
-pytest
-
-# Run only unit tests
-pytest tests/unit/
-
-# Run with verbose output
-pytest -v
-
-# Run with coverage report
-pytest --cov=src tests/
+git clone https://github.com/ozanunal0/viper.git
+cd viper
+python -m venv venv
+source venv/bin/activate  # or venv\Scripts\activate on Windows
+pip install -r requirements.txt
 ```
 
-### Security Scanning
-
-We use the following tools for security scanning:
-
-- **bandit**: Security issue scanner
-  ```bash
-  bandit -r src/
-  ```
-
-- **safety**: Dependency vulnerability scanner
-  ```bash
-  safety check -r requirements.txt
-  ```
-
-## Pre-commit Hooks
-
-Pre-commit hooks run automatically when you commit changes and check for:
-- Trailing whitespace
-- Properly formatted files
-- YAML syntax errors
-- Correctly sorted imports
-- Properly formatted code (Black)
-- Linting issues (flake8)
-- Security issues (bandit)
-
-You can manually run the pre-commit hooks on all files:
+### 2. Environment Config
 ```bash
+cp env.example .env
+# Edit .env with your API keys
+```
+
+### 3. Database Setup
+```bash
+python src/initialize_db.py
+```
+
+## Development Workflow
+
+### Run Tests
+```bash
+pytest tests/
+```
+
+### Code Quality
+```bash
+flake8 src/
+black src/
 pre-commit run --all-files
 ```
 
-## Continuous Integration
+### Local Development
+```bash
+# Dashboard
+python main.py dashboard
 
-This project uses GitHub Actions for CI. The workflow runs:
-- Linting checks
-- Formatting checks
-- Security scans
-- Unit tests
+# CLI
+python main.py cli --days 7
 
-The CI pipeline runs automatically on pushes to main and on pull requests.
+# MCP Server Test
+python -m src.mcp_server_demo
+```
 
-## Adding New Dependencies
+## Project Structure
 
-1. Add runtime dependencies to `requirements.txt`
-2. Add development dependencies to `requirements-dev.txt`
-3. Run `pip install -r requirements.txt -r requirements-dev.txt`
+```
+src/
+├── mcp_server.py           # MCP integration
+├── main_mvp.py             # CLI application
+├── clients/                # API clients
+├── dashboard/              # Streamlit UI
+├── utils/                  # Utilities
+├── gemini_analyzer.py      # AI analysis
+└── risk_analyzer.py        # Risk scoring
+```
+
+## Adding Features
+
+### New Data Source
+1. Create client in `src/clients/`
+2. Add integration to `main_mvp.py`
+3. Update database schema if needed
+
+### New MCP Tool
+1. Add async method to `ViperMCPServer`
+2. Register in `_register_tools()`
+3. Add tests and documentation
+
+### Dashboard Page
+1. Create in `src/dashboard/pages/`
+2. Follow existing patterns
+3. Update navigation
+
+## Configuration
+
+Key environment variables:
+- `GEMINI_API_KEY` - Required for AI features
+- `GITHUB_TOKEN` - Enhanced exploit search
+- `NVD_API_KEY` - Higher rate limits
+
+## Database
+
+SQLite database: `data/viper.db`
+- Schema: See `src/utils/database_handler.py`
+- Migrations: Manual (add to `initialize_db.py`)
+
+## Contributing
+
+1. Fork repository
+2. Create feature branch
+3. Follow code quality checks
+4. Add tests for new features
+5. Submit pull request

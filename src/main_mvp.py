@@ -12,6 +12,7 @@ import yaml
 
 from src.clients.cisa_kev_client import fetch_kev_catalog
 from src.clients.epss_client import get_epss_score, get_epss_scores_batch
+from src.clients.exa_client import search_cve_related_content, search_general_threat_intelligence
 from src.clients.exploit_search_client import find_public_exploits
 from src.clients.microsoft_update_client import (
     fetch_latest_patch_tuesday_data,
@@ -23,6 +24,9 @@ from src.risk_analyzer import analyze_cve_risk, calculate_combined_risk_score, g
 
 # Import configuration getters
 from src.utils.config import (
+    get_exa_api_key,
+    get_exa_general_queries,
+    get_exa_results_per_query,
     get_exploit_db_api_url,
     get_gemini_api_key,
     get_gemini_concurrent_requests,
@@ -33,6 +37,7 @@ from src.utils.config import (
 )
 from src.utils.database_handler import (
     get_all_cve_ids_from_db,
+    get_articles_needing_analysis,
     get_cve_details,
     get_cves_missing_epss,
     get_cves_with_alerts,
@@ -40,6 +45,7 @@ from src.utils.database_handler import (
     get_unprocessed_cves,
     initialize_db,
     store_cves,
+    store_threat_articles,
     update_cve_epss_data,
     update_cve_exploit_data,
     update_cve_kev_status,
@@ -558,6 +564,83 @@ async def scan_all_cves_for_exploits(max_cves=None, include_processed=False):
     return await enrich_cves_with_exploits(cves_to_process)
 
 
+async def perform_semantic_searches(cve_list_for_context=None, general_queries=None):
+    """
+    Performs semantic searches using EXA AI for threat intelligence gathering.
+
+    Args:
+        cve_list_for_context (Optional[List[Dict]]): List of high/medium priority CVEs to search for
+        general_queries (Optional[List[str]]): List of general threat intelligence queries
+
+    Returns:
+        int: Total number of articles stored from all searches
+    """
+    total_articles_stored = 0
+
+    # Check if EXA API key is configured
+    try:
+        get_exa_api_key()
+    except ValueError:
+        logger.warning("EXA_API_KEY not configured. Skipping semantic searches.")
+        return 0
+
+    logger.info("Starting EXA AI semantic searches for threat intelligence")
+
+    # Search for CVE-specific content
+    if cve_list_for_context:
+        logger.info(f"Searching for content related to {len(cve_list_for_context)} high/medium priority CVEs")
+
+        for cve in cve_list_for_context:
+            cve_id = cve.get("cve_id")
+            if not cve_id:
+                continue
+
+            try:
+                logger.info(f"Searching for content related to {cve_id}")
+                articles = await search_cve_related_content(cve_id=cve_id, num_results=get_exa_results_per_query())
+
+                if articles:
+                    stored_count = store_threat_articles(
+                        articles_data=articles,
+                        cve_id_association=cve_id,
+                        source_query=f"technical analysis and exploitation of {cve_id}",
+                    )
+                    total_articles_stored += stored_count
+                    logger.info(f"Stored {stored_count} articles for {cve_id}")
+                else:
+                    logger.info(f"No articles found for {cve_id}")
+
+            except Exception as e:
+                logger.error(f"Error searching for CVE {cve_id}: {str(e)}")
+                continue
+
+    # Search for general threat intelligence
+    if general_queries:
+        logger.info(f"Performing {len(general_queries)} general threat intelligence searches")
+
+        try:
+            articles = await search_general_threat_intelligence(
+                queries=general_queries, num_results=get_exa_results_per_query()
+            )
+
+            if articles:
+                stored_count = store_threat_articles(
+                    articles_data=articles,
+                    cve_id_association=None,  # Not associated with a specific CVE
+                    source_query="general_threat_intelligence",
+                )
+                total_articles_stored += stored_count
+                logger.info(f"Stored {stored_count} general threat intelligence articles")
+            else:
+                logger.info("No general threat intelligence articles found")
+
+        except Exception as e:
+            logger.error(f"Error performing general threat intelligence searches: {str(e)}")
+
+    logger.info(f"Semantic searches completed. Total articles stored: {total_articles_stored}")
+    return total_articles_stored
+
+
 def run_cti_feed(days_back=None, scan_all_exploits=False, max_cves_for_exploit_scan=None):
     """
     Runs the full CTI feed workflow:
@@ -690,6 +773,21 @@ def run_cti_feed(days_back=None, scan_all_exploits=False, max_cves_for_exploit_s
             logger.info("Calculating risk scores and generating alerts")
             cves_with_alerts_count = asyncio.run(process_risk_scoring_alerts(priority_cves))
 
+            # Step 11: Perform semantic searches for threat intelligence
+            logger.info("Performing semantic searches for threat intelligence")
+            print("\nPerforming semantic searches for threat intelligence...")
+
+            # Get general queries from configuration
+            general_queries = get_exa_general_queries()
+
+            # Perform semantic searches
+            articles_stored = asyncio.run(
+                perform_semantic_searches(cve_list_for_context=priority_cves, general_queries=general_queries)
+            )
+
+            if articles_stored > 0:
+                print(f"\nStored {articles_stored} threat intelligence articles from semantic searches.")
+
             print(f"\n{'=' * 80}")
             print(f"FOUND {len(priority_cves)} HIGH/MEDIUM PRIORITY CVEs")
             print(f"{'=' * 80}")
@@ -697,7 +795,7 @@ def run_cti_feed(days_back=None, scan_all_exploits=False, max_cves_for_exploit_s
             for cve in priority_cves:
                 display_cve(cve)
 
-            # Step 11: Display CVEs with alerts
+            # Step 12: Display CVEs with alerts
             if cves_with_alerts_count > 0:
                 logger.info("Retrieving and displaying CVEs with alerts")
                 cves_with_alerts = get_cves_with_alerts()
@@ -709,7 +807,7 @@ def run_cti_feed(days_back=None, scan_all_exploits=False, max_cves_for_exploit_s
                 for cve in cves_with_alerts:
                     display_cve_with_alerts(cve)
         else:
-            print("\nNo high or medium priority CVEs found.")
+            print("\nNo high or medium priority CVes found.")
 
         logger.info("VIPER CTI feed workflow completed successfully")
 

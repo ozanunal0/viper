@@ -108,6 +108,55 @@ def initialize_db():
                         # Log other errors but continue with other columns
                         logger.warning(f"Error adding column {column}: {str(e)}")
 
+        # Create the threat_articles table if it doesn't exist
+        cursor.execute(
+            """
+        CREATE TABLE IF NOT EXISTS threat_articles (
+            article_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cve_id_association TEXT,
+            source_query TEXT,
+            url TEXT UNIQUE NOT NULL,
+            title TEXT,
+            published_date TEXT,
+            content_text TEXT,
+            content_highlights TEXT,
+            fetched_date TEXT,
+            gemini_summary TEXT,
+            extracted_iocs TEXT,
+            identified_ttps TEXT,
+            mentioned_actors TEXT,
+            FOREIGN KEY (cve_id_association) REFERENCES cves(cve_id)
+        )
+        """
+        )
+
+        # Get existing columns for threat_articles table
+        cursor.execute("PRAGMA table_info(threat_articles)")
+        existing_articles_columns = [column[1] for column in cursor.fetchall()]
+        logger.debug(f"Existing threat_articles columns: {existing_articles_columns}")
+
+        # Define expected columns for threat_articles table
+        articles_column_definitions = {
+            "author": "TEXT",
+            "score": "REAL",
+        }
+
+        # Add any missing columns to threat_articles table
+        for column, column_type in articles_column_definitions.items():
+            if column not in existing_articles_columns:
+                try:
+                    logger.debug(f"Adding {column} column to threat_articles table")
+                    cursor.execute(f"ALTER TABLE threat_articles ADD COLUMN {column} {column_type}")
+                except sqlite3.OperationalError as e:
+                    # Check if this is a "duplicate column" error
+                    if "duplicate column name" in str(e):
+                        logger.warning(
+                            f"Column {column} appears to already exist in threat_articles, skipping: {str(e)}"
+                        )
+                    else:
+                        # Log other errors but continue with other columns
+                        logger.warning(f"Error adding column {column} to threat_articles: {str(e)}")
+
         conn.commit()
         logger.debug("Database initialized successfully")
     except sqlite3.Error as e:
@@ -1489,6 +1538,352 @@ def get_high_priority_cves():
 
     except sqlite3.Error as e:
         logger.error(f"Database error while fetching HIGH priority CVEs: {str(e)}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
+def store_threat_articles(
+    articles_data: List[Dict], cve_id_association: Optional[str] = None, source_query: Optional[str] = None
+) -> int:
+    """
+    Stores threat articles retrieved from EXA AI searches in the database.
+
+    Args:
+        articles_data (List[Dict]): List of article dictionaries from EXA search
+        cve_id_association (Optional[str]): CVE ID if the search was for a specific CVE
+        source_query (Optional[str]): The query that led to these articles
+
+    Returns:
+        int: Number of newly inserted articles
+    """
+    if not articles_data:
+        logger.warning("No articles provided to store")
+        return 0
+
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        cursor = conn.cursor()
+
+        inserted_count = 0
+        current_time = datetime.now().isoformat()
+
+        for article in articles_data:
+            try:
+                # Extract data from article dictionary
+                url = article.get("url", "")
+                title = article.get("title", "")
+                published_date = article.get("published_date")
+                content_text = article.get("text", "")
+                highlights = article.get("highlights", [])
+                author = article.get("author")
+                score = article.get("score")
+
+                # Skip articles without URL
+                if not url:
+                    logger.warning("Skipping article without URL")
+                    continue
+
+                # Convert highlights list to JSON string
+                content_highlights = None
+                if highlights:
+                    try:
+                        content_highlights = json.dumps(highlights)
+                    except Exception as e:
+                        logger.warning(f"Error serializing highlights for {url}: {str(e)}")
+                        content_highlights = str(highlights)
+
+                # Use INSERT OR IGNORE to avoid duplicates based on URL
+                cursor.execute(
+                    """
+                INSERT OR IGNORE INTO threat_articles (
+                    cve_id_association, source_query, url, title, published_date,
+                    content_text, content_highlights, fetched_date, author, score
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        cve_id_association,
+                        source_query,
+                        url,
+                        title,
+                        published_date,
+                        content_text,
+                        content_highlights,
+                        current_time,
+                        author,
+                        score,
+                    ),
+                )
+
+                if cursor.rowcount > 0:
+                    inserted_count += 1
+                    logger.debug(f"Stored article: {title[:50]}...")
+                else:
+                    logger.debug(f"Article already exists (skipped): {url}")
+
+            except sqlite3.Error as e:
+                logger.error(f"Error storing article {article.get('url', 'unknown')}: {str(e)}")
+                continue
+
+        conn.commit()
+        logger.info(f"Successfully stored {inserted_count} new threat articles")
+        return inserted_count
+
+    except sqlite3.Error as e:
+        logger.error(f"Database error while storing threat articles: {str(e)}")
+        return 0
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_articles_for_cve(cve_id: str) -> List[Dict]:
+    """
+    Retrieves all threat articles associated with a specific CVE ID.
+
+    Args:
+        cve_id (str): The CVE ID to search for
+
+    Returns:
+        List[Dict]: List of article dictionaries associated with the CVE
+    """
+    if not cve_id:
+        logger.error("No CVE ID provided")
+        return []
+
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+        SELECT article_id, cve_id_association, source_query, url, title, published_date,
+               content_text, content_highlights, fetched_date, gemini_summary,
+               extracted_iocs, identified_ttps, mentioned_actors, author, score
+        FROM threat_articles
+        WHERE cve_id_association = ?
+        ORDER BY fetched_date DESC
+        """,
+            (cve_id,),
+        )
+
+        rows = cursor.fetchall()
+        articles = []
+
+        for row in rows:
+            # Parse JSON fields
+            highlights = []
+            if row["content_highlights"]:
+                try:
+                    highlights = json.loads(row["content_highlights"])
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON in content_highlights for article {row['article_id']}")
+
+            extracted_iocs = None
+            if row["extracted_iocs"]:
+                try:
+                    extracted_iocs = json.loads(row["extracted_iocs"])
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON in extracted_iocs for article {row['article_id']}")
+
+            identified_ttps = None
+            if row["identified_ttps"]:
+                try:
+                    identified_ttps = json.loads(row["identified_ttps"])
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON in identified_ttps for article {row['article_id']}")
+
+            mentioned_actors = None
+            if row["mentioned_actors"]:
+                try:
+                    mentioned_actors = json.loads(row["mentioned_actors"])
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON in mentioned_actors for article {row['article_id']}")
+
+            articles.append(
+                {
+                    "article_id": row["article_id"],
+                    "cve_id_association": row["cve_id_association"],
+                    "source_query": row["source_query"],
+                    "url": row["url"],
+                    "title": row["title"],
+                    "published_date": row["published_date"],
+                    "content_text": row["content_text"],
+                    "content_highlights": highlights,
+                    "fetched_date": row["fetched_date"],
+                    "gemini_summary": row["gemini_summary"],
+                    "extracted_iocs": extracted_iocs,
+                    "identified_ttps": identified_ttps,
+                    "mentioned_actors": mentioned_actors,
+                    "author": row["author"],
+                    "score": row["score"],
+                }
+            )
+
+        logger.debug(f"Found {len(articles)} articles for CVE {cve_id}")
+        return articles
+
+    except sqlite3.Error as e:
+        logger.error(f"Database error while fetching articles for CVE {cve_id}: {str(e)}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_articles_needing_analysis() -> List[Dict]:
+    """
+    Retrieves threat articles that need Gemini analysis (where gemini_summary is NULL).
+
+    Returns:
+        List[Dict]: List of article dictionaries that need analysis
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+        SELECT article_id, cve_id_association, source_query, url, title, published_date,
+               content_text, content_highlights, fetched_date, author, score
+        FROM threat_articles
+        WHERE gemini_summary IS NULL
+        ORDER BY fetched_date DESC
+        LIMIT 50
+        """,
+        )
+
+        rows = cursor.fetchall()
+        articles = []
+
+        for row in rows:
+            # Parse highlights JSON
+            highlights = []
+            if row["content_highlights"]:
+                try:
+                    highlights = json.loads(row["content_highlights"])
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON in content_highlights for article {row['article_id']}")
+
+            articles.append(
+                {
+                    "article_id": row["article_id"],
+                    "cve_id_association": row["cve_id_association"],
+                    "source_query": row["source_query"],
+                    "url": row["url"],
+                    "title": row["title"],
+                    "published_date": row["published_date"],
+                    "content_text": row["content_text"],
+                    "content_highlights": highlights,
+                    "fetched_date": row["fetched_date"],
+                    "author": row["author"],
+                    "score": row["score"],
+                }
+            )
+
+        logger.debug(f"Found {len(articles)} articles needing analysis")
+        return articles
+
+    except sqlite3.Error as e:
+        logger.error(f"Database error while fetching articles needing analysis: {str(e)}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_all_threat_articles(limit: Optional[int] = None) -> List[Dict]:
+    """
+    Retrieves all threat articles from the database.
+
+    Args:
+        limit (Optional[int]): Maximum number of articles to return
+
+    Returns:
+        List[Dict]: List of all article dictionaries
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        query = """
+        SELECT article_id, cve_id_association, source_query, url, title, published_date,
+               content_text, content_highlights, fetched_date, gemini_summary,
+               extracted_iocs, identified_ttps, mentioned_actors, author, score
+        FROM threat_articles
+        ORDER BY fetched_date DESC
+        """
+
+        if limit:
+            query += f" LIMIT {limit}"
+
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        articles = []
+
+        for row in rows:
+            # Parse JSON fields
+            highlights = []
+            if row["content_highlights"]:
+                try:
+                    highlights = json.loads(row["content_highlights"])
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON in content_highlights for article {row['article_id']}")
+
+            extracted_iocs = None
+            if row["extracted_iocs"]:
+                try:
+                    extracted_iocs = json.loads(row["extracted_iocs"])
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON in extracted_iocs for article {row['article_id']}")
+
+            identified_ttps = None
+            if row["identified_ttps"]:
+                try:
+                    identified_ttps = json.loads(row["identified_ttps"])
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON in identified_ttps for article {row['article_id']}")
+
+            mentioned_actors = None
+            if row["mentioned_actors"]:
+                try:
+                    mentioned_actors = json.loads(row["mentioned_actors"])
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON in mentioned_actors for article {row['article_id']}")
+
+            articles.append(
+                {
+                    "article_id": row["article_id"],
+                    "cve_id_association": row["cve_id_association"],
+                    "source_query": row["source_query"],
+                    "url": row["url"],
+                    "title": row["title"],
+                    "published_date": row["published_date"],
+                    "content_text": row["content_text"],
+                    "content_highlights": highlights,
+                    "fetched_date": row["fetched_date"],
+                    "gemini_summary": row["gemini_summary"],
+                    "extracted_iocs": extracted_iocs,
+                    "identified_ttps": identified_ttps,
+                    "mentioned_actors": mentioned_actors,
+                    "author": row["author"],
+                    "score": row["score"],
+                }
+            )
+
+        logger.debug(f"Retrieved {len(articles)} threat articles")
+        return articles
+
+    except sqlite3.Error as e:
+        logger.error(f"Database error while fetching all threat articles: {str(e)}")
         return []
     finally:
         if conn:

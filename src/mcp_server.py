@@ -10,8 +10,15 @@ import asyncio
 import json
 import logging
 import sys
+import warnings
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
+
+# Suppress urllib3 SSL warnings that can interfere with MCP protocol
+warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL 1.1.1+")
+
+# CLAUDE DESKTOP COMPATIBILITY FLAG - Set to False to disable problematic EXA tools
+ENABLE_EXA_GENERAL_SEARCH = False  # Set to False if Claude Desktop still has issues
 
 # Add startup error logging
 print("Starting Viper MCP Server - Import phase...", file=sys.stderr, flush=True)
@@ -21,6 +28,14 @@ try:
     try:
         from .clients.cisa_kev_client import fetch_kev_catalog
         from .clients.epss_client import get_epss_score
+        from .clients.exa_client import (
+            find_similar_threat_articles,
+            generate_threat_intelligence_answer,
+            search_and_get_contents,
+            search_cve_related_content,
+            search_general_threat_intelligence,
+            validate_exa_client,
+        )
         from .clients.exploit_search_client import (
             find_public_exploits,
             search_exploit_db,
@@ -33,8 +48,19 @@ try:
         from .clients.nvd_client import fetch_single_cve_details
         from .gemini_analyzer import analyze_cve_with_gemini, analyze_cve_with_gemini_async
         from .risk_analyzer import analyze_cve_risk, calculate_combined_risk_score, generate_alerts
-        from .utils.config import get_nvd_api_key
-        from .utils.database_handler import get_cve_details, store_or_update_cve
+        from .utils.config import (
+            get_exa_general_queries,
+            get_exa_results_per_query,
+            get_nvd_api_key,
+        )
+        from .utils.database_handler import (
+            get_all_threat_articles,
+            get_articles_for_cve,
+            get_articles_needing_analysis,
+            get_cve_details,
+            store_or_update_cve,
+            store_threat_articles,
+        )
 
         print("Successfully imported with relative imports", file=sys.stderr, flush=True)
 
@@ -56,6 +82,14 @@ try:
         try:
             from clients.cisa_kev_client import fetch_kev_catalog
             from clients.epss_client import get_epss_score
+            from clients.exa_client import (
+                find_similar_threat_articles,
+                generate_threat_intelligence_answer,
+                search_and_get_contents,
+                search_cve_related_content,
+                search_general_threat_intelligence,
+                validate_exa_client,
+            )
             from clients.exploit_search_client import (
                 find_public_exploits,
                 search_exploit_db,
@@ -66,8 +100,19 @@ try:
                 fetch_patch_tuesday_data,
             )
             from clients.nvd_client import fetch_single_cve_details
-            from utils.config import get_nvd_api_key
-            from utils.database_handler import get_cve_details, store_or_update_cve
+            from utils.config import (
+                get_exa_general_queries,
+                get_exa_results_per_query,
+                get_nvd_api_key,
+            )
+            from utils.database_handler import (
+                get_all_threat_articles,
+                get_articles_for_cve,
+                get_articles_needing_analysis,
+                get_cve_details,
+                store_or_update_cve,
+                store_threat_articles,
+            )
 
             print("Successfully imported with direct imports", file=sys.stderr, flush=True)
 
@@ -123,6 +168,45 @@ try:
             def fetch_latest_patch_tuesday_data():
                 return None
 
+            # EXA AI fallback functions
+            async def search_and_get_contents(*args, **kwargs):
+                return []
+
+            async def search_cve_related_content(cve_id, num_results=3):
+                return []
+
+            async def search_general_threat_intelligence(queries, num_results=3):
+                return []
+
+            def validate_exa_client():
+                return False
+
+            async def generate_threat_intelligence_answer(query, include_full_text=True):
+                return None
+
+            async def find_similar_threat_articles(
+                reference_url, num_results=5, include_content=True, exclude_source_domain=True
+            ):
+                return []
+
+            def get_exa_results_per_query():
+                return 5
+
+            def get_exa_general_queries():
+                return []
+
+            def store_threat_articles(articles, cve_id=None, source_query=None):
+                return 0
+
+            def get_articles_for_cve(cve_id):
+                return []
+
+            def get_all_threat_articles(limit=None):
+                return []
+
+            def get_articles_needing_analysis():
+                return []
+
             print("Using fallback functions", file=sys.stderr, flush=True)
 
     # Initialize logging
@@ -150,7 +234,7 @@ class ViperMCPServer:
 
     def _register_tools(self) -> Dict[str, Dict[str, Any]]:
         """Register all available tools."""
-        return {
+        tools = {
             # Original tools
             "get_gemini_cve_priority": {
                 "description": "Analyzes a CVE using Viper's Gemini integration to determine its priority (HIGH/MEDIUM/LOW). Example: 'Analyze CVE-2023-12345 with Gemini for priority assessment'",
@@ -328,7 +412,162 @@ class ViperMCPServer:
                     "required": ["cve_id"],
                 },
             },
+            # EXA AI semantic search tools
+            "search_threat_intelligence_with_exa": {
+                "description": "Performs semantic search for threat intelligence using EXA AI. Can search for specific topics, vulnerabilities, or general cybersecurity content. Example: 'Search for latest ransomware attack techniques' or 'Find articles about zero-day exploits in 2024'",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query for threat intelligence"},
+                        "num_results": {
+                            "type": "integer",
+                            "description": "Number of results to return",
+                            "default": 5,
+                        },
+                        "include_domains": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of domains to include in search",
+                        },
+                        "exclude_domains": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of domains to exclude from search",
+                        },
+                        "start_date": {
+                            "type": "string",
+                            "description": "Start date for content (YYYY-MM-DD)",
+                        },
+                        "end_date": {
+                            "type": "string",
+                            "description": "End date for content (YYYY-MM-DD)",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+            "search_cve_content_with_exa": {
+                "description": "Searches for content specifically related to a CVE using EXA AI semantic search. Finds technical analyses, exploit details, and research about the vulnerability. Example: 'Find content about CVE-2024-1234'",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "cve_id": {"type": "string", "description": "CVE identifier to search for"},
+                        "num_results": {
+                            "type": "integer",
+                            "description": "Number of results to return",
+                            "default": 3,
+                        },
+                    },
+                    "required": ["cve_id"],
+                },
+            },
+            "get_stored_threat_articles": {
+                "description": "Retrieves threat intelligence articles stored in the Viper database from previous EXA searches. Can filter by CVE association or get all articles. Example: 'Get all stored threat articles' or 'Get articles for CVE-2024-5678'",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "cve_id": {
+                            "type": "string",
+                            "description": "CVE ID to filter articles for (optional)",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of articles to return",
+                        },
+                        "needing_analysis": {
+                            "type": "boolean",
+                            "description": "Only return articles that need Gemini analysis",
+                            "default": False,
+                        },
+                    },
+                },
+            },
+            "validate_exa_integration": {
+                "description": "Validates that EXA AI integration is working properly and returns configuration details. Example: 'Check if EXA AI is working.'",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                },
+            },
+            "generate_threat_intelligence_answer": {
+                "description": "Generates a comprehensive answer to a threat intelligence question using EXA's AI capabilities with citations. Provides synthesized responses from multiple reliable sources. Example: 'What are the latest ransomware attack techniques?'",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "The threat intelligence question to answer"},
+                        "include_full_text": {
+                            "type": "boolean",
+                            "description": "Whether to include full text of source citations",
+                            "default": True,
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+            "find_similar_threat_articles": {
+                "description": "Finds articles similar to a reference threat intelligence article URL. Useful for discovering related threats, similar attack techniques, or follow-up research. Example: 'Find articles similar to this threat report: https://example.com/threat-report'",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "reference_url": {
+                            "type": "string",
+                            "description": "URL of the reference article to find similar content for",
+                        },
+                        "num_results": {
+                            "type": "integer",
+                            "description": "Number of similar articles to return",
+                            "default": 5,
+                        },
+                        "include_content": {
+                            "type": "boolean",
+                            "description": "Whether to include full text and highlights",
+                            "default": True,
+                        },
+                        "exclude_source_domain": {
+                            "type": "boolean",
+                            "description": "Whether to exclude results from the same domain as reference URL",
+                            "default": True,
+                        },
+                    },
+                    "required": ["reference_url"],
+                },
+            },
         }
+
+        # Conditionally add the problematic tool if enabled
+        if ENABLE_EXA_GENERAL_SEARCH:
+            tools["perform_general_threat_intelligence_search"] = {
+                "description": "Performs multiple semantic searches for general threat intelligence using predefined or custom queries. Discovers emerging threats, attack techniques, and cybersecurity trends. OPTIMIZED FOR CLAUDE DESKTOP. Example: 'Run general threat intelligence search'",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "custom_queries": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Custom threat intelligence queries to search for",
+                        },
+                        "num_results_per_query": {
+                            "type": "integer",
+                            "description": "Number of results per query",
+                            "default": 3,
+                        },
+                        "save_to_database": {
+                            "type": "boolean",
+                            "description": "Whether to save results to the database",
+                            "default": False,
+                        },
+                    },
+                },
+            }
+        else:
+            print(
+                "[ViperMCP] perform_general_threat_intelligence_search disabled for Claude Desktop compatibility",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        return tools
 
     # Original tool methods (keeping existing implementation)
     async def get_gemini_cve_priority(self, cve_data: Dict[str, Any]) -> str:
@@ -578,9 +817,9 @@ class ViperMCPServer:
                     kev_date_added = None
 
                     for entry in kev_catalog:
-                        if entry.get("cveID") == cve_id:
+                        if entry.get("cve_id") == cve_id:
                             is_in_kev = True
-                            kev_date_added = entry.get("dateAdded")
+                            kev_date_added = entry.get("date_added")
                             break
 
                     comprehensive_cve_data["is_in_kev"] = is_in_kev
@@ -816,9 +1055,9 @@ class ViperMCPServer:
             kev_date_added = None
 
             for entry in kev_catalog:
-                if entry.get("cveID") == cve_id:
+                if entry.get("cve_id") == cve_id:
                     is_in_kev = True
-                    kev_date_added = entry.get("dateAdded")
+                    kev_date_added = entry.get("date_added")
                     break
 
             result = {"cve_id": cve_id, "is_in_kev": is_in_kev, "kev_date_added": kev_date_added}
@@ -989,6 +1228,307 @@ class ViperMCPServer:
             error_result = {"cve_id": cve_id, "error": error_msg, "msrc_documents": []}
             return json.dumps(error_result, indent=2)
 
+    # EXA AI tool implementations
+    async def search_threat_intelligence_with_exa(
+        self,
+        query: str,
+        num_results: int = 5,
+        include_domains: Optional[List[str]] = None,
+        exclude_domains: Optional[List[str]] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> str:
+        """
+        Performs semantic search for threat intelligence using EXA AI.
+        Can search for specific topics, vulnerabilities, or general cybersecurity content.
+        Example: 'Search for latest ransomware attack techniques' or 'Find articles about zero-day exploits in 2024.'
+        """
+        print(f"[ViperMCP-EXA] Performing threat intelligence search: '{query}'...", file=sys.stderr, flush=True)
+
+        try:
+            articles = await search_and_get_contents(
+                query=query,
+                num_results=num_results,
+                type="neural",  # Use semantic search
+                include_domains=include_domains,
+                exclude_domains=exclude_domains,
+                start_published_date=start_date,
+                end_published_date=end_date,
+            )
+
+            if articles:
+                result = {
+                    "query": query,
+                    "num_results_found": len(articles),
+                    "search_parameters": {
+                        "num_results_requested": num_results,
+                        "include_domains": include_domains,
+                        "exclude_domains": exclude_domains,
+                        "start_date": start_date,
+                        "end_date": end_date,
+                    },
+                    "articles": articles,
+                }
+            else:
+                result = {
+                    "query": query,
+                    "num_results_found": 0,
+                    "message": "No articles found for the specified query",
+                    "search_parameters": {
+                        "num_results_requested": num_results,
+                        "include_domains": include_domains,
+                        "exclude_domains": exclude_domains,
+                        "start_date": start_date,
+                        "end_date": end_date,
+                    },
+                    "articles": [],
+                }
+
+            return json.dumps(result, indent=2)
+
+        except Exception as e:
+            error_msg = f"Error performing EXA threat intelligence search: {str(e)}"
+            print(error_msg, file=sys.stderr, flush=True)
+            error_result = {"query": query, "error": error_msg, "articles": []}
+            return json.dumps(error_result, indent=2)
+
+    async def search_cve_content_with_exa(self, cve_id: str, num_results: int = 3) -> str:
+        """
+        Searches for content specifically related to a CVE using EXA AI semantic search.
+        Finds technical analyses, exploit details, and research about the vulnerability.
+        Example: 'Find content about CVE-2024-1234.'
+        """
+        print(f"[ViperMCP-EXA] Searching CVE-related content for {cve_id}...", file=sys.stderr, flush=True)
+
+        try:
+            articles = await search_cve_related_content(cve_id=cve_id, num_results=num_results)
+
+            result = {
+                "cve_id": cve_id,
+                "num_results_found": len(articles) if articles else 0,
+                "articles": articles if articles else [],
+            }
+
+            if not articles:
+                result["message"] = f"No content found related to {cve_id}"
+
+            return json.dumps(result, indent=2)
+
+        except Exception as e:
+            error_msg = f"Error searching CVE content for {cve_id}: {str(e)}"
+            print(error_msg, file=sys.stderr, flush=True)
+            error_result = {"cve_id": cve_id, "error": error_msg, "articles": []}
+            return json.dumps(error_result, indent=2)
+
+    async def perform_general_threat_intelligence_search(
+        self,
+        custom_queries: Optional[List[str]] = None,
+        num_results_per_query: int = 3,
+        save_to_database: bool = False,
+    ) -> str:
+        """
+        Performs multiple semantic searches for general threat intelligence using predefined or custom queries.
+        Discovers emerging threats, attack techniques, and cybersecurity trends.
+        Example: 'Run general threat intelligence search.'
+        """
+        print(f"[ViperMCP-EXA] Performing general threat intelligence search...", file=sys.stderr, flush=True)
+
+        try:
+            # Use custom queries if provided, otherwise use configured default queries
+            if custom_queries:
+                queries = custom_queries[:1]  # Limit even custom queries to 1 for Claude Desktop
+                print(f"[ViperMCP-EXA] Using 1 custom query (limited for Claude Desktop)", file=sys.stderr, flush=True)
+            else:
+                # Get default queries but limit to just 1 to ensure Claude Desktop compatibility
+                all_default_queries = await asyncio.to_thread(get_exa_general_queries)
+                queries = all_default_queries[:1]  # Limit to just 1 query for Claude Desktop
+                print(
+                    f"[ViperMCP-EXA] Using 1 default query (ultra-conservative for Claude Desktop)",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
+            if not queries:
+                return json.dumps(
+                    {
+                        "error": "No queries available for threat intelligence search",
+                        "articles": [],
+                    }
+                )
+
+            # Ultra-conservative settings: 1 result, 10-second timeout
+            try:
+                articles = await asyncio.wait_for(
+                    search_general_threat_intelligence(
+                        queries=queries, num_results=1  # Always limit to 1 result for Claude Desktop
+                    ),
+                    timeout=10.0,  # Ultra-short timeout for Claude Desktop
+                )
+            except asyncio.TimeoutError:
+                return json.dumps(
+                    {
+                        "error": "Search operation timed out after 10 seconds",
+                        "suggestion": "Function optimized for Claude Desktop compatibility",
+                        "queries_attempted": queries,
+                        "articles": [],
+                    }
+                )
+
+            # Process articles to make them Claude Desktop compatible (much smaller)
+            claude_compatible_articles = []
+            for article in articles[:1]:  # Only process first article
+                try:
+                    # Create a severely truncated version for Claude Desktop
+                    compatible_article = {
+                        "url": article.get("url", "")[:200],  # Limit URL length
+                        "title": article.get("title", "")[:150],  # Limit title length
+                        "published_date": article.get("published_date", ""),
+                        "summary": article.get("text", "")[:300] + "..."
+                        if article.get("text", "")
+                        else "",  # Very short summary
+                        "highlights_count": len(article.get("highlights", [])),
+                        "score": round(article.get("score", 0.0), 3),
+                        "source_query": article.get("source_query", ""),
+                    }
+                    claude_compatible_articles.append(compatible_article)
+                except Exception as e:
+                    print(
+                        f"[ViperMCP-EXA] Error processing article for Claude Desktop: {e}", file=sys.stderr, flush=True
+                    )
+                    continue
+
+            # Save to database if requested
+            articles_saved = 0
+            if save_to_database and articles:
+                try:
+                    articles_saved = await asyncio.to_thread(
+                        store_threat_articles,
+                        articles,  # Save full articles to DB
+                        None,  # No specific CVE association
+                        "General threat intelligence search",
+                    )
+                    print(f"[ViperMCP-EXA] Saved {articles_saved} articles to database", file=sys.stderr, flush=True)
+                except Exception as save_error:
+                    print(f"[ViperMCP-EXA] Error saving articles: {str(save_error)}", file=sys.stderr, flush=True)
+
+            # Create Claude Desktop optimized result (very compact)
+            result = {
+                "status": "success",
+                "queries_used": queries,
+                "total_found": len(articles),
+                "returned_summaries": len(claude_compatible_articles),
+                "articles_saved": articles_saved if save_to_database else 0,
+                "note": "Summaries truncated for Claude Desktop compatibility. Full articles saved to DB if requested.",
+                "articles": claude_compatible_articles,
+            }
+
+            # Ensure the JSON is small enough for Claude Desktop
+            json_result = json.dumps(result, indent=2)
+            if len(json_result) > 5000:  # If still too large, truncate further
+                result["articles"] = claude_compatible_articles[:1]  # Only keep first article
+                result["note"] += " Response further limited due to size constraints."
+                json_result = json.dumps(result, indent=2)
+
+            return json_result
+
+        except Exception as e:
+            error_msg = f"Error performing general threat intelligence search: {str(e)}"
+            print(error_msg, file=sys.stderr, flush=True)
+            error_result = {"status": "error", "error": error_msg, "articles": [], "claude_desktop_compatible": True}
+            return json.dumps(error_result, indent=2)
+
+    async def get_stored_threat_articles(
+        self,
+        cve_id: Optional[str] = None,
+        limit: Optional[int] = None,
+        needing_analysis: bool = False,
+    ) -> str:
+        """
+        Retrieves threat intelligence articles stored in the Viper database from previous EXA searches.
+        Can filter by CVE association or get all articles.
+        Example: 'Get all stored threat articles' or 'Get articles for CVE-2024-5678.'
+        """
+        print(f"[ViperMCP-EXA] Retrieving stored threat articles...", file=sys.stderr, flush=True)
+
+        try:
+            if needing_analysis:
+                # Get articles that need Gemini analysis
+                articles = await asyncio.to_thread(get_articles_needing_analysis)
+                filter_description = "articles needing analysis"
+            elif cve_id:
+                # Get articles for specific CVE
+                articles = await asyncio.to_thread(get_articles_for_cve, cve_id)
+                filter_description = f"articles for {cve_id}"
+            else:
+                # Get all articles
+                articles = await asyncio.to_thread(get_all_threat_articles, limit)
+                filter_description = "all articles"
+
+            result = {
+                "filter_applied": filter_description,
+                "cve_id": cve_id,
+                "limit": limit,
+                "needing_analysis": needing_analysis,
+                "num_articles_found": len(articles),
+                "articles": articles,
+            }
+
+            if not articles:
+                result["message"] = f"No {filter_description} found in database"
+
+            return json.dumps(result, indent=2)
+
+        except Exception as e:
+            error_msg = f"Error retrieving stored threat articles: {str(e)}"
+            print(error_msg, file=sys.stderr, flush=True)
+            error_result = {"error": error_msg, "articles": []}
+            return json.dumps(error_result, indent=2)
+
+    async def validate_exa_integration(self) -> str:
+        """
+        Validates that EXA AI integration is working properly by testing the API connection.
+        Example: 'Check if EXA AI is working.'
+        """
+        print(f"[ViperMCP-EXA] Validating EXA AI integration...", file=sys.stderr, flush=True)
+
+        try:
+            # Test EXA client validation
+            is_valid = await asyncio.to_thread(validate_exa_client)
+
+            # Get configuration details
+            results_per_query = await asyncio.to_thread(get_exa_results_per_query)
+            general_queries = await asyncio.to_thread(get_exa_general_queries)
+
+            result = {
+                "exa_client_valid": is_valid,
+                "configuration": {
+                    "results_per_query": results_per_query,
+                    "general_queries_count": len(general_queries),
+                    "general_queries": general_queries,
+                },
+                "status": "EXA AI integration is working" if is_valid else "EXA AI integration has issues",
+            }
+
+            if not is_valid:
+                result["troubleshooting"] = [
+                    "Check that EXA_API_KEY is set in environment variables",
+                    "Verify that exa-py package is installed",
+                    "Check network connectivity to EXA AI API",
+                    "Verify API key is valid and has sufficient credits",
+                ]
+
+            return json.dumps(result, indent=2)
+
+        except Exception as e:
+            error_msg = f"Error validating EXA integration: {str(e)}"
+            print(error_msg, file=sys.stderr, flush=True)
+            error_result = {
+                "exa_client_valid": False,
+                "error": error_msg,
+                "status": "EXA AI integration validation failed",
+            }
+            return json.dumps(error_result, indent=2)
+
     def _get_risk_level(self, risk_score: float) -> str:
         """Convert risk score to risk level."""
         if risk_score >= 0.8:
@@ -1066,12 +1606,19 @@ class ViperMCPServer:
                         "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
                     }
 
-            # Handle unsupported methods
-            elif method in ["resources/list", "prompts/list"]:
+            # Handle resources and prompts methods (return empty lists to avoid errors)
+            elif method == "resources/list":
                 return {
                     "jsonrpc": "2.0",
                     "id": request_id,
-                    "error": {"code": -32601, "message": f"Method not supported: {method}"},
+                    "result": {"resources": []},
+                }
+
+            elif method == "prompts/list":
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {"prompts": []},
                 }
 
             else:
@@ -1140,6 +1687,88 @@ class ViperMCPServer:
                     "error": {"code": -32603, "message": f"Internal error: {str(e)}"},
                 }
                 print(json.dumps(error_response), flush=True)
+
+    async def generate_threat_intelligence_answer(
+        self,
+        query: str,
+        include_full_text: bool = True,
+    ) -> str:
+        """
+        Generates a comprehensive answer to a threat intelligence question using EXA's AI capabilities.
+        Provides synthesized responses from multiple reliable sources with citations.
+        Example: 'What are the latest ransomware attack techniques?'
+        """
+        print(f"[ViperMCP-EXA] Generating threat intelligence answer for: '{query}'...", file=sys.stderr, flush=True)
+
+        try:
+            answer_data = await generate_threat_intelligence_answer(query=query, include_full_text=include_full_text)
+
+            if not answer_data:
+                result = {
+                    "query": query,
+                    "answer": "No answer could be generated for this query.",
+                    "citations": [],
+                    "error": "No response from EXA AI answer generation",
+                }
+            else:
+                result = {
+                    "query": query,
+                    "answer": answer_data.get("answer", ""),
+                    "citations": answer_data.get("citations", []),
+                    "num_citations": len(answer_data.get("citations", [])),
+                }
+
+            return json.dumps(result, indent=2)
+
+        except Exception as e:
+            error_msg = f"Error generating threat intelligence answer for '{query}': {str(e)}"
+            print(error_msg, file=sys.stderr, flush=True)
+            error_result = {"query": query, "error": error_msg, "answer": "", "citations": []}
+            return json.dumps(error_result, indent=2)
+
+    async def find_similar_threat_articles(
+        self,
+        reference_url: str,
+        num_results: int = 5,
+        include_content: bool = True,
+        exclude_source_domain: bool = True,
+    ) -> str:
+        """
+        Finds articles similar to a reference threat intelligence article URL.
+        Useful for discovering related threats, similar attack techniques, or follow-up research.
+        Example: 'Find articles similar to this threat report: https://example.com/threat-report'
+        """
+        print(f"[ViperMCP-EXA] Finding similar threat articles to: {reference_url}...", file=sys.stderr, flush=True)
+
+        try:
+            similar_articles = await find_similar_threat_articles(
+                reference_url=reference_url,
+                num_results=num_results,
+                include_content=include_content,
+                exclude_source_domain=exclude_source_domain,
+            )
+
+            result = {
+                "reference_url": reference_url,
+                "num_results_found": len(similar_articles) if similar_articles else 0,
+                "similar_articles": similar_articles if similar_articles else [],
+                "search_parameters": {
+                    "num_results": num_results,
+                    "include_content": include_content,
+                    "exclude_source_domain": exclude_source_domain,
+                },
+            }
+
+            if not similar_articles:
+                result["message"] = f"No similar articles found for the reference URL: {reference_url}"
+
+            return json.dumps(result, indent=2)
+
+        except Exception as e:
+            error_msg = f"Error finding similar articles for '{reference_url}': {str(e)}"
+            print(error_msg, file=sys.stderr, flush=True)
+            error_result = {"reference_url": reference_url, "error": error_msg, "similar_articles": []}
+            return json.dumps(error_result, indent=2)
 
 
 async def main():

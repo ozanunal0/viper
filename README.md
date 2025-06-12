@@ -19,14 +19,9 @@
 ![Google Gemini](https://img.shields.io/badge/google%20gemini-8E75B2?style=for-the-badge&logo=google%20gemini&logoColor=white)
 ![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)
 ![Claude](https://img.shields.io/badge/Claude-AI_Integration-FF6B35?style=for-the-badge&logo=anthropic&logoColor=white)
-![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
-![macOS](https://img.shields.io/badge/mac%20os-000000?style=for-the-badge&logo=macos&logoColor=F0F0F0)
 ![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)
-![GitHub Actions](https://img.shields.io/badge/github%20actions-%232671E5.svg?style=for-the-badge&logo=githubactions&logoColor=white)
-![PyCharm](https://img.shields.io/badge/pycharm-143?style=for-the-badge&logo=pycharm&logoColor=black&color=black&labelColor=green)
 
 </p>
-
 
 # 🛡️ VIPER - Vulnerability Intelligence, Prioritization, and Exploitation Reporter
 
@@ -39,50 +34,54 @@ In an era of ever-increasing cyber threats, VIPER cuts through the noise. It ing
 
 VIPER now includes a **Model Context Protocol (MCP) server** that integrates seamlessly with Claude Desktop, providing **12 powerful cybersecurity tools** accessible through natural language:
 
-For a detailed list of tools and usage examples, see the [MCP_IMPLEMENTATION_SUMMARY.md](docs/MCP%20docs/MCP_IMPLEMENTATION_SUMMARY.md)
-
 ### **📺 Viper MCP Demo**
 
 [![Watch the VIPER Demo Video](public/demo.jpg)](https://player.vimeo.com/video/1090650637?h=0dc04c492a)
 
-### **💬 Natural Language Examples:**
+- `perform_live_cve_lookup` - Full CVE analysis
+- `get_nvd_cve_details` - NVD data
+- `get_epss_data_for_cve` - Exploitation probability
+- `check_cve_in_cisa_kev` - CISA KEV status
+- `search_public_exploits_for_cve` - GitHub/Exploit-DB search
+- `get_gemini_cve_analysis` - AI analysis
+- `get_viper_risk_score` - Risk scoring
+- `save_cve_data_to_viperdb` - Database storage
+- And 4 more...
 
-For a detailed list of promt usage examples, see the [VIPER_MCP_PROMPTS.md](docs/MCP%20docs/VIPER_MCP_PROMPTS.md)
+**Usage Examples:**
+```
+"Analyze CVE-2024-3400 with full Viper analysis"
+"Find exploits for CVE-2023-44487"
+"Check if CVE-2024-1234 is in CISA KEV"
+```
 
+## 🔧 Quick Setup
 
-### **⚡ Quick MCP Setup:**
+### 1. Install
+```bash
+git clone https://github.com/ozanunal0/viper.git
+cd viper
+./setup.sh
+```
 
-1. **Configure your Claude Desktop** with this MCP server configuration:
-   ```json
-   {
-     "mcpServers": {
-       "ViperMCPServer": {
-         "command": "/FULL/PATH/TO/YOUR/viper/run_mcp_clean.sh"
-       }
-     }
-   }
-   ```
+### 2. Configure
+```bash
+cp env.example .env
+# Add your GEMINI_API_KEY
+```
 
-2. **See the [MCP_SERVER_README.md](docs/MCP%20docs/MCP_SERVER_README.md)** for complete setup instructions
+### 3. Claude Desktop MCP
+```json
+{
+  "mcpServers": {
+    "ViperMCPServer": {
+      "command": "/FULL/PATH/TO/viper/run_mcp_clean.sh"
+    }
+  }
+}
+```
 
-## 📚 Documentation
-
-📖 **Complete documentation is available in the [docs/](docs/) directory:**
-
-## 📋 Table of Contents
-
-1.  [🎯 Screenshots](#dashboard)
-2.  [✨ Core Features](#-core-features)
-3.  [🛠️ Technology Stack](#-tech-stack)
-4.  [🚀 Installation & Setup](#-installation--setup)
-5.  [⚙️ Usage](#-usage)
-6.  [🗂️ Project Structure](#project-structure)
-7.  [📈 Development Status & Roadmap](#project-roadmap--future-vision)
-
----
-## Dashboard
-
-VIPER provides a comprehensive dashboard for visualizing and analyzing vulnerability data:
+## 📊 Screenshots
 
 ### Home Screen
 ![Home](https://i.imgur.com/5Ri40Oc.png)
@@ -99,191 +98,42 @@ VIPER provides a comprehensive dashboard for visualizing and analyzing vulnerabi
 ### Analytics & Trends
 ![analytics.png](public/analytics.png)
 
+---
 
-## ✨ Core Features
+## 🖥️ Usage
 
-* **Multi-Source Data Ingestion:**
-    * ✅ NVD, EPSS, CISA KEV, Microsoft Patch Tuesday, Exploit-DB & GitHub.
-* **AI-Powered Analysis & Prioritization:**
-    * 🧠 Deep contextual analysis with **Google Gemini AI** and **Claude Desktop (via MCP)**.
-* **Comprehensive Risk Scoring:**
-    * 📈 Customizable weighted scoring (CVSS, EPSS, KEV, Microsoft Severity, Gemini AI, Exploit Availability).
-* **Centralized & Enriched Data Storage:**
-    * 🗄️ SQLite database for all collected and enriched vulnerability intelligence.
-* **Multiple Access Interfaces:**
-    * 🖥️ **Interactive Streamlit Dashboard:** User-friendly web interface for data exploration and analysis.
-    * 💻 **CLI Mode:** For backend data processing, fetching, and analysis.
-    * 🤖 **Claude Desktop MCP Integration:** Natural language vulnerability analysis with 12 specialized tools.
-* **Advanced Features:**
-    * 🔎 **Live CVE Lookup:** Real-time search and analysis of any CVE from NVD.
+**Claude Desktop (Recommended):**
+- Natural language vulnerability analysis
+- Real-time CVE lookups
+- Risk scoring and prioritization
 
-
-## 🚀 Tech Stack
-
-* **Backend & Analysis:** Python
-* **AI Models:** Google Gemini, Claude (via MCP)
-* **MCP Integration:** Model Context Protocol server for Claude Desktop
-* **Web Interface/Dashboard:** Streamlit
-* **Database:** SQLite
-* **Key Libraries:** requests, google-generativeai, tenacity, pandas, plotly
-
-## 🛠️ Installation & Setup
-
-### Prerequisites
-
-- **Python 3.9+**
-- **Claude Desktop** (for MCP integration)
-- **Git**
-- **Virtual Environment** (recommended)
-
-### Option 1: Automated Setup (Recommended)
-
-```bash
-git clone git@github.com:ozanunal0/viper.git
-cd viper
-./setup.sh
-```
-
-### Option 2: Manual Setup
-
-### 1. **Clone the Repository:**
-```bash
-git clone git@github.com:ozanunal0/viper.git
-cd viper
-```
-
-### 2. **Create and Activate a Virtual Environment (Recommended):**
-```bash
-python -m venv venv
-# On Linux/macOS:
-source venv/bin/activate
-# On Windows:
-# venv\Scripts\activate
-```
-
-### 3. **Install Dependencies:**
-```bash
-pip install -r requirements.txt
-```
-
-### 4. **Configure Environment Variables:**
-
-Copy the example environment file and configure your API keys:
-```bash
-cp env.example .env
-nano .env  # Edit with your preferred editor
-```
-
-**Essential configuration:**
-```dotenv
-# Required for AI analysis
-GEMINI_API_KEY=your_gemini_api_key_here
-
-# Recommended for enhanced functionality
-GITHUB_TOKEN=your_github_token_here
-EXPLOIT_DB_API_URL=https://www.exploit-db.com/api/v1
-EXPLOIT_SEARCH_MAX_RESULTS=10
-PUBLIC_EXPLOIT_BOOST_FACTOR=1.5
-
-# Optional for higher rate limits
-NVD_API_KEY=your_nvd_api_key_here
-```
-
-### 5. **Configure Claude Desktop MCP Integration (Optional but Recommended):**
-
-
-For detailed setup instructions, refer to the [MCP_SERVER_README.md](docs/MCP%20docs/MCP_SERVER_README.md)
-
-## 🐳 Docker Deployment
-
-VIPER can be deployed using Docker for easy setup and management.
-For detailed Docker deployment instructions, database management, and troubleshooting, see [DOCKER.md](docs/DOCKER.md).
-
-
-
-## ⚙️ Usage
-
-### 1. **Claude Desktop MCP Integration** (Recommended for Interactive Analysis)
-
-Once configured, use natural language with Claude Desktop to analyze vulnerabilities:
-
-**Example Queries:**
-```
-📋 "Get comprehensive analysis for CVE-2024-3400"
-🔍 "Find all public exploits for CVE-2023-44487 on GitHub"
-⚠️ "Check if CVE-2024-1234 is in the CISA KEV catalog"
-📊 "Calculate the Viper risk score for CVE-2023-5678"
-🤖 "Analyze CVE-2024-0001 with Gemini AI and generate alerts"
-💾 "Get live NVD details for CVE-2024-3400 and save to database"
-```
-Refer to the [MCP_IMPLEMENTATION_SUMMARY.md](docs/MCP%20docs/MCP_IMPLEMENTATION_SUMMARY.md) for available tools.
-
-### 2. **Command Line Interface (CLI)**
-
-Use the CLI to fetch, process, and analyze vulnerability data. The results (high/medium priority CVEs and alerts) will be printed to the console.
-
-```bash
-python main.py cli --days <NUMBER_OF_DAYS>
-```
-Days will affect the intensity and performance of outputs.
-
-### 3. **Interactive Dashboard**
-
-Launch the Streamlit dashboard:
+**Dashboard:**
 ```bash
 python main.py dashboard
 ```
-Or directly with:
+
+**CLI:**
 ```bash
-./scripts/run_dashboard.sh
+python main.py cli --days 7
 ```
 
-## Project Structure
+## ✨ Features
 
-```
-viper/
-├── main.py                  # Main entry point script
-├── requirements.txt         # Project dependencies
-├── README.md                # Project documentation
-├── CONFIGURATION_GUIDE.md   # MCP setup and environment configuration
-├── .gitignore               # Git ignore file
-├── run_mcp_clean.sh         # MCP server runner script for Claude Desktop
-├── test_exploit_search.py   # Tool to test GitHub exploit search
-├── update_github_exploits.py # Tool to update CVEs with GitHub exploit data
-├── data/                    # Data storage directory
-│   └── viper.db             # SQLite database
-├── logs/                    # Log files directory
-│   └── viper.log            # Application logs
-├── scripts/                 # Utility scripts
-│   ├── run_dashboard.sh     # Script to run the dashboard
-│   └── update_exploits.py   # Script to update exploit data for existing CVEs
-├── src/                     # Source code
-│   ├── mcp_server.py        # 🆕 MCP server with 12 cybersecurity tools
-│   ├── clients/             # API clients
-│   │   ├── cisa_kev_client.py        # CISA KEV API client
-│   │   ├── epss_client.py            # EPSS API client
-│   │   ├── exploit_search_client.py  # Public exploit search client
-│   │   ├── nvd_client.py             # NVD API client
-│   │   └── microsoft_update_client.py # Microsoft Patch Tuesday API client
-│   ├── dashboard/           # Dashboard application
-│   │   ├── app.py              # Main dashboard app
-│   │   └── pages/              # Dashboard pages
-│   │       ├── 01_Dashboard.py           # Main dashboard page
-│   │       ├── 02_Detailed_Analysis.py   # Detailed CVE analysis page
-│   │       ├── 03_Live_CVE_Lookup.py     # Live CVE lookup and analysis
-│   │       └── 04_Analytics.py           # Analytics and trends page
-│   ├── utils/               # Utility modules
-│   │   ├── config.py            # Configuration management
-│   │   └── database_handler.py  # Database operations
-│   ├── gemini_analyzer.py   # Gemini AI analysis
-│   ├── main_mvp.py          # CLI application logic
-│   └── risk_analyzer.py     # Risk scoring and alerts
-```
+- **Multi-source data**: NVD, EPSS, CISA KEV, Microsoft
+- **AI analysis**: Google Gemini integration
+- **Risk scoring**: Weighted multi-factor scoring
+- **Live lookup**: Real-time CVE analysis
+- **Multiple interfaces**: Dashboard, CLI, Claude Desktop
+
+## 📚 Documentation
+
+- [MCP Setup](docs/MCP%20docs/MCP_SERVER_README.md) - Complete MCP configuration
+- [Development](docs/DEVELOPMENT.md) - Development setup
+- [Docker](docs/DOCKER.md) - Container deployment
+- [Database](docs/DATABASE_TROUBLESHOOTING.md) - Database configuration
 
 
 ## Project Roadmap & Future Vision
-
-VIPER aims to be a comprehensive, AI-driven Cyber Threat Intelligence (CTI) platform, drawing inspiration from advanced, multi-layered CTI systems. Our current version provides a strong foundation with NVD, EPSS, CISA KEV, and Microsoft MSRC data ingestion, coupled with Gemini AI for analysis, risk scoring, and an interactive Streamlit dashboard with real-time CVE lookup.
 
 Here's where we're headed:
 
@@ -351,4 +201,6 @@ Explore and integrate other relevant CISA feeds beyond the KEV catalog (e.g., CI
 * **[📝] Notification System:** Implement email or other notifications for high-priority alerts or newly discovered critical CVEs matching predefined criteria.
 * **[📝] Database Optimization/Migration:** For larger deployments, consider migrating from SQLite to a more scalable database like PostgreSQL.
 
-This roadmap is ambitious and will evolve. Community contributions and feedback are highly encouraged as we build VIPER into a powerful open-source CTI tool!
+
+
+**Star ⭐ the repo if VIPER helps with your vulnerability management!**
