@@ -69,7 +69,7 @@ jobs:
 
     - name: Run tests with coverage
       run: |
-        pip install pytest-cov pytest-xunit
+        pip install pytest-cov
         pytest --cov=src --cov-report=xml --cov-report=html --junitxml=test-results.xml
 
     - name: SonarQube Scan
