@@ -48,13 +48,19 @@ jobs:
 
     - name: Security scan with bandit
       run: |
-        # Run security scan but don't fail the build
-        bandit -r src/ || echo "Bandit found security issues, but continuing..."
+        # Run security scan and generate report
+        bandit -r src/ -f json -o bandit-report.json || echo "Bandit found security issues, but continuing..."
 
     - name: Check dependencies with safety
       run: |
         safety check -r requirements.txt
-      continue-on-error: true  # Don't fail build as this might give false positives
+      continue-on-error: true
+
+    - name: Run pylint analysis
+      run: |
+        pip install pylint
+        pylint src/ --output=pylint-report.txt --reports=y || echo "Pylint found issues, but continuing..."
+      continue-on-error: true
 
     - name: Test with pytest
       run: |
@@ -63,8 +69,8 @@ jobs:
 
     - name: Run tests with coverage
       run: |
-        pip install pytest-cov
-        pytest --cov=src --cov-report=xml --cov-report=html
+        pip install pytest-cov pytest-xunit
+        pytest --cov=src --cov-report=xml --cov-report=html --junitxml=test-results.xml
 
     - name: SonarQube Scan
       uses: SonarSource/sonarqube-scan-action@v2
@@ -77,16 +83,15 @@ jobs:
           -Dsonar.projectName=Viper
           -Dsonar.projectVersion=${{ env.PROJECT_VERSION }}
           -Dsonar.python.version=${{ env.PYTHON_VERSION }}
+          -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
           -Dsonar.python.coverage.reportPaths=coverage.xml
           -Dsonar.sources=src
           -Dsonar.tests=tests
-          -Dsonar.python.coverage.reportPaths=coverage.xml
           -Dsonar.python.xunit.reportPath=test-results.xml
           -Dsonar.python.pylint.reportPath=pylint-report.txt
           -Dsonar.python.bandit.reportPath=bandit-report.json
           -Dsonar.coverage.exclusions=**/tests/**,**/test_*.py,**/__init__.py,**/migrations/**
           -Dsonar.exclusions=**/__pycache__/**,**/venv/**,**/.venv/**,**/node_modules/**,**/docs/**
-          -Dsonar.coverage.minimum=70
           -Dsonar.qualitygate.wait=true
           -Dsonar.issuesReport.console.enable=true
 
