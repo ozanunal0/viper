@@ -347,7 +347,7 @@ def update_cve_priority(cve_id, priority, raw_response=None):
         conn = sqlite3.connect(get_db_file_name())
         cursor = conn.cursor()
 
-        current_time = datetime.now(datetime.UTC).isoformat()
+        current_time = datetime.utcnow().isoformat()
 
         cursor.execute(
             """
@@ -1198,7 +1198,7 @@ def store_or_update_cve(cve_data):
             else:
                 # Add current timestamp
                 update_fields.append("processed_at = ?")
-                update_values.append(datetime.now(datetime.UTC).isoformat())
+                update_values.append(datetime.now().isoformat())
 
             if "epss_score" in cve_data and cve_data["epss_score"] is not None:
                 update_fields.append("epss_score = ?")
@@ -1301,7 +1301,7 @@ def store_or_update_cve(cve_data):
 
             # Add processed timestamp
             fields.append("processed_at")
-            values.append(cve_data.get("processed_at", datetime.now(datetime.UTC).isoformat()))
+            values.append(cve_data.get("processed_at", datetime.now().isoformat()))
 
             if "epss_score" in cve_data:
                 fields.append("epss_score")
@@ -1568,7 +1568,7 @@ def store_threat_articles(
         cursor = conn.cursor()
 
         inserted_count = 0
-        current_time = datetime.now(datetime.UTC).isoformat()
+        current_time = datetime.now().isoformat()
 
         for article in articles_data:
             try:

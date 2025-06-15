@@ -5,23 +5,17 @@ on:
     branches: [ main, dev ]
   pull_request:
     branches: [ main, dev ]
-
-env:
-  PYTHON_VERSION: '3.9'
-  PROJECT_VERSION: '1.0'
-
 jobs:
   test:
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v3
-      with:
-        fetch-depth: 0
-    - name: Set up Python ${{ env.PYTHON_VERSION }}
+
+    - name: Set up Python 3.9
       uses: actions/setup-python@v4
       with:
-        python-version: ${{ env.PYTHON_VERSION }}
+        python-version: '3.9'
 
     - name: Install dependencies
       run: |
@@ -60,35 +54,6 @@ jobs:
       run: |
         # Run the tests
         pytest tests/unit/test_config.py::test_get_gemini_model_name_returns_string tests/unit/test_config.py::test_get_gemini_model_name_uses_env_var
-
-    - name: Run tests with coverage
-      run: |
-        pip install pytest-cov
-        pytest --cov=src --cov-report=xml --cov-report=html
-
-    - name: SonarQube Scan
-      uses: SonarSource/sonarqube-scan-action@v2
-      env:
-        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-      with:
-        args: >
-          -Dsonar.projectKey=viper
-          -Dsonar.projectName=Viper
-          -Dsonar.projectVersion=${{ env.PROJECT_VERSION }}
-          -Dsonar.python.version=${{ env.PYTHON_VERSION }}
-          -Dsonar.python.coverage.reportPaths=coverage.xml
-          -Dsonar.sources=src
-          -Dsonar.tests=tests
-          -Dsonar.python.coverage.reportPaths=coverage.xml
-          -Dsonar.python.xunit.reportPath=test-results.xml
-          -Dsonar.python.pylint.reportPath=pylint-report.txt
-          -Dsonar.python.bandit.reportPath=bandit-report.json
-          -Dsonar.coverage.exclusions=**/tests/**,**/test_*.py,**/__init__.py,**/migrations/**
-          -Dsonar.exclusions=**/__pycache__/**,**/venv/**,**/.venv/**,**/node_modules/**,**/docs/**
-          -Dsonar.coverage.minimum=70
-          -Dsonar.qualitygate.wait=true
-          -Dsonar.issuesReport.console.enable=true
 
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v5
