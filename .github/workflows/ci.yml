@@ -65,7 +65,7 @@ jobs:
         args: >
           -Dsonar.projectKey=ozanunal0_viper
           -Dsonar.projectName=viper
-          -Dsonar.organization=ozanunal0
+          -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
           -Dsonar.projectVersion=${{ env.PROJECT_VERSION }}
           -Dsonar.python.version=${{ env.PYTHON_VERSION }}
           -Dsonar.python.coverage.reportPaths=coverage.xml
