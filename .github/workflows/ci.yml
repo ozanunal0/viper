@@ -65,12 +65,22 @@ jobs:
         args: >
           -Dsonar.projectKey=ozanunal0_viper
           -Dsonar.projectName=viper
+          -Dsonar.organization=ozanunal0
+          -Dsonar.projectVersion=${{ env.PROJECT_VERSION }}
+          -Dsonar.python.version=${{ env.PYTHON_VERSION }}
+          -Dsonar.python.coverage.reportPaths=coverage.xml
           -Dsonar.sources=src
           -Dsonar.tests=tests
           -Dsonar.python.coverage.reportPaths=coverage.xml
-          -Dsonar.coverage.exclusions=**/tests/**,**/test_*.py
+          -Dsonar.python.xunit.reportPath=test-results.xml
+          -Dsonar.python.pylint.reportPath=pylint-report.txt
+          -Dsonar.python.bandit.reportPath=bandit-report.json
+          -Dsonar.coverage.exclusions=**/tests/**,**/test_*.py,**/__init__.py,**/migrations/**
+          -Dsonar.exclusions=**/__pycache__/**,**/venv/**,**/.venv/**,**/node_modules/**,**/docs/**
+          -Dsonar.coverage.minimum=70
           -Dsonar.qualitygate.wait=true
-
+          -Dsonar.issuesReport.console.enable=true
+          
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v5
       with:
