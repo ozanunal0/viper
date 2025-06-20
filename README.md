@@ -67,7 +67,9 @@ cd viper
 ### 2. Configure
 ```bash
 cp env.example .env
-# Add your GEMINI_API_KEY
+# Edit .env with your settings:
+# - GEMINI_API_KEY for Gemini AI (default provider)
+# - Or set LLM_PROVIDER=ollama for local LLM
 ```
 
 ### 3. Claude Desktop MCP
@@ -117,13 +119,46 @@ python main.py dashboard
 python main.py cli --days 7
 ```
 
+## 🏠 Local LLM with Ollama
+
+For privacy-focused analysis without external API dependencies:
+
+### Quick Setup
+```bash
+# 1. Set LLM provider to Ollama
+echo "LLM_PROVIDER=ollama" >> .env
+
+# 2. Start with Docker Compose (includes Ollama)
+docker-compose up -d
+
+# 3. Pull a model (run once)
+docker exec -it viper_ollama ollama pull llama3:8b
+
+# 4. Access VIPER at http://localhost:8501
+```
+
+### Available Models
+- `llama3:8b` - Good balance of speed and quality (default)
+- `llama3:70b` - Higher quality, requires more resources
+- `codellama:7b` - Optimized for code analysis
+- `mistral:7b` - Fast and efficient
+
+### Configuration
+```bash
+# In .env file
+LLM_PROVIDER=ollama
+OLLAMA_API_BASE_URL=http://localhost:11434  # or http://ollama:11434 in Docker
+LOCAL_LLM_MODEL_NAME=llama3:8b
+```
+
 ## ✨ Features
 
 - **Multi-source data**: NVD, EPSS, CISA KEV, Microsoft
-- **AI analysis**: Google Gemini integration
+- **Flexible AI analysis**: Choose between Gemini AI or local Ollama models
 - **Risk scoring**: Weighted multi-factor scoring
 - **Live lookup**: Real-time CVE analysis
 - **Multiple interfaces**: Dashboard, CLI, Claude Desktop
+- **Privacy options**: Local LLM support for offline/private analysis
 
 ## 📚 Documentation
 
@@ -155,11 +190,11 @@ Here's where we're headed:
 
 ### Phase 2: Expanding Data Ingestion & Enrichment
 
-* **[🚧] Local LLM Support (Ollama Integration):**
-    * Implement local LLM support primarily through Ollama for enhanced privacy and offline capabilities.
-    * Enable AI-powered vulnerability analysis without external API dependencies.
-    * Support for popular models like Llama, Code Llama, and specialized security-focused models.
-    * Configurable model selection and local deployment options.
+* **[✅] Local LLM Support (Ollama Integration):**
+    * ✅ Implemented local LLM support through Ollama for enhanced privacy and offline capabilities.
+    * ✅ AI-powered vulnerability analysis without external API dependencies.
+    * ✅ Support for popular models like Llama3, Code Llama, and other Ollama-compatible models.
+    * ✅ Configurable model selection and deployment options via environment variables.
 
 ✅ ~~Other CISA Products & Feeds: Explore and integrate other relevant CISA feeds beyond the KEV catalog (e.g., CISA Alerts, Industrial Control Systems Advisories if applicable).
 Explore and integrate other relevant CISA feeds beyond the KEV catalog (e.g., CISA Alerts, Industrial Control Systems Advisories if applicable).~~

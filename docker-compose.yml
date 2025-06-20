@@ -14,15 +14,40 @@ services:
     environment:
       # Explicitly set the database path for Docker
       - DB_FILE_NAME=/app/data/viper.db
-      # You can add your API keys and other configuration here
+      # LLM Provider Configuration
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OLLAMA_API_BASE_URL=${OLLAMA_API_BASE_URL:-http://ollama:11434}
+      - LOCAL_LLM_MODEL_NAME=${LOCAL_LLM_MODEL_NAME:-llama3:8b}
+      # Other API keys and configuration
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - EXPLOIT_DB_API_URL=${EXPLOIT_DB_API_URL:-}
       - LOG_LEVEL=INFO
     restart: unless-stopped
+    depends_on:
+      - ollama
     # Use bridge networking (default)
     # network_mode: "host"
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: viper_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    # Optional: GPU support (uncomment if you have NVIDIA GPU)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
 volumes:
   data:
+    driver: local
+  ollama_data:
     driver: local
