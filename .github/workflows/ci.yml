@@ -8,6 +8,7 @@ on:
   pull_request:
     branches: [ main, dev ]
 
+
 jobs:
   test-and-analyze:
     runs-on: ubuntu-latest
@@ -65,6 +66,11 @@ jobs:
         args: >
           -Dsonar.projectKey=ozanunal0_viper
           -Dsonar.projectName=viper
+
+          -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+          -Dsonar.projectVersion=${{ env.PROJECT_VERSION }}
+          -Dsonar.python.version=${{ env.PYTHON_VERSION }}
+          -Dsonar.python.coverage.reportPaths=coverage.xml
           -Dsonar.sources=src
           -Dsonar.tests=tests
           -Dsonar.python.coverage.reportPaths=coverage.xml
