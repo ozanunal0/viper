@@ -88,7 +88,7 @@ def _extract_cve_data_for_prompt(cve_data: dict) -> dict:
     if has_public_exploit and exploit_references:
         if isinstance(exploit_references, list):
             sources = set(exploit.get("source", "Unknown") for exploit in exploit_references)
-            exploit_info = f"Yes, {len(exploit_references)} exploit(s) found on {', '.join(sources)}"
+            exploit_info = f"Yes, {len(exploit_references)} exploit(s) found on {', '.join(sorted(sources))}"
         else:
             exploit_info = "Yes, exploits available"
 
@@ -104,6 +104,44 @@ def _extract_cve_data_for_prompt(cve_data: dict) -> dict:
         "patch_tuesday_date": patch_tuesday_date,
         "exploit_info": exploit_info,
     }
+
+
+def _format_cve_info_block(data: dict, include_ms_details: bool = True) -> str:
+    """
+    Creates a formatted CVE information block to eliminate duplication.
+
+    Args:
+        data (dict): Extracted CVE data from _extract_cve_data_for_prompt()
+        include_ms_details (bool): Whether to include Microsoft-specific details
+
+    Returns:
+        str: Formatted CVE information block
+    """
+    info_lines = [
+        f"CVE ID: {data['cve_id']}",
+        f"CVSS v3 Score: {data['cvss_score']}",
+        f"EPSS Score: {data['epss_info']}",
+        f"In CISA KEV (Known Exploited Vulnerabilities Catalog): {data['kev_info']}",
+        f"Microsoft Severity: {data['ms_severity']}",
+        f"Affected Microsoft Product Family: {data['ms_product_family']}",
+    ]
+
+    if include_ms_details:
+        info_lines.extend(
+            [
+                f"Specific Microsoft Product: {data['ms_product_name']}",
+                f"Microsoft Patch Tuesday Date: {data['patch_tuesday_date']}",
+            ]
+        )
+
+    info_lines.extend(
+        [
+            f"Public Exploits Available: {data['exploit_info']}",
+            f"Description: {data['description']}",
+        ]
+    )
+
+    return "\n".join(info_lines)
 
 
 @retry(
@@ -257,19 +295,15 @@ def _create_ollama_prompt(cve_data: dict) -> str:
     # Extract CVE data using shared function
     data = _extract_cve_data_for_prompt(cve_data)
 
+    # Format CVE information block (excluding MS details for cleaner Ollama prompt)
+    cve_info = _format_cve_info_block(data, include_ms_details=False)
+
     # Create a prompt optimized for local models with clear structure
     prompt = f"""<analysis>
 You are a cybersecurity expert analyzing vulnerability data. Analyze the following CVE and determine its priority for a typical mid-to-large organization.
 
 CVE Information:
-- CVE ID: {data['cve_id']}
-- CVSS v3 Score: {data['cvss_score']}
-- EPSS Score: {data['epss_info']}
-- In CISA KEV Catalog: {data['kev_info']}
-- Microsoft Severity: {data['ms_severity']}
-- Microsoft Product Family: {data['ms_product_family']}
-- Public Exploits Available: {data['exploit_info']}
-- Description: {data['description']}
+{cve_info}
 
 Based on this information, consider:
 1. Impact severity (RCE, data breach, DoS)
@@ -334,21 +368,15 @@ def _create_gemini_prompt(cve_data: dict) -> str:
     # Extract CVE data using shared function
     data = _extract_cve_data_for_prompt(cve_data)
 
+    # Format CVE information block (including MS details for comprehensive Gemini analysis)
+    cve_info = _format_cve_info_block(data, include_ms_details=True)
+
     # Construct the prompt
     prompt = f"""
 Analyze the following CVE information to determine its priority for a typical mid-to-large sized organization. Consider potential impact (RCE, data breach, DoS), ubiquity of the affected software, and reported exploitation (if any can be inferred).
 Respond with only ONE of the following words: HIGH, MEDIUM, or LOW.
 
-CVE ID: {data['cve_id']}
-CVSS v3 Score: {data['cvss_score']}
-EPSS Score: {data['epss_info']}
-In CISA KEV (Known Exploited Vulnerabilities Catalog): {data['kev_info']}
-Microsoft Severity: {data['ms_severity']}
-Affected Microsoft Product Family: {data['ms_product_family']}
-Specific Microsoft Product: {data['ms_product_name']}
-Microsoft Patch Tuesday Date: {data['patch_tuesday_date']}
-Public Exploits Available: {data['exploit_info']}
-Description: {data['description']}
+{cve_info}
 
 Priority:
 """
