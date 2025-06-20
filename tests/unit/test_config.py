@@ -69,7 +69,7 @@ def test_get_gemini_model_name_uses_env_var(mocker):
 def test_get_gemini_model_name_with_env_var(mocker):
     """Test get_gemini_model_name with environment variable set."""
     # Mock os.getenv to return our test value
-    expected_model = "gemini-2.5-flash-preview-04-17"
+    expected_model = "gemini-2.5-flash"
     mocker.patch.dict(os.environ, {"GEMINI_MODEL": expected_model})
 
     # Import here to ensure our mock is applied

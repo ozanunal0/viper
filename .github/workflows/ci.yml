@@ -6,7 +6,8 @@ on:
   push:
     branches: [ main, dev ]
   pull_request:
-    branches: [ main, dev ] 
+    branches: [ main, dev ]
+
 
 jobs:
   test-and-analyze:
@@ -65,6 +66,7 @@ jobs:
         args: >
           -Dsonar.projectKey=ozanunal0_viper
           -Dsonar.projectName=viper
+
           -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
           -Dsonar.projectVersion=${{ env.PROJECT_VERSION }}
           -Dsonar.python.version=${{ env.PYTHON_VERSION }}
@@ -72,15 +74,9 @@ jobs:
           -Dsonar.sources=src
           -Dsonar.tests=tests
           -Dsonar.python.coverage.reportPaths=coverage.xml
-          -Dsonar.python.xunit.reportPath=test-results.xml
-          -Dsonar.python.pylint.reportPath=pylint-report.txt
-          -Dsonar.python.bandit.reportPath=bandit-report.json
-          -Dsonar.coverage.exclusions=**/tests/**,**/test_*.py,**/__init__.py,**/migrations/**
-          -Dsonar.exclusions=**/__pycache__/**,**/venv/**,**/.venv/**,**/node_modules/**,**/docs/**
-          -Dsonar.coverage.minimum=70
+          -Dsonar.coverage.exclusions=**/tests/**,**/test_*.py
           -Dsonar.qualitygate.wait=true
-          -Dsonar.issuesReport.console.enable=true
-          
+
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v5
       with:

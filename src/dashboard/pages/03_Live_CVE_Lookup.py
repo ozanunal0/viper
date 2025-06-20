@@ -25,9 +25,9 @@ from src.clients.cisa_kev_client import fetch_kev_catalog
 from src.clients.epss_client import get_epss_score
 from src.clients.exploit_search_client import find_public_exploits, search_exploit_db, search_github
 from src.clients.nvd_client import fetch_single_cve_details
-from src.gemini_analyzer import analyze_cve_with_gemini_async
+from src.llm_analyzer import analyze_cve_async
 from src.risk_analyzer import analyze_cve_risk
-from src.utils.config import get_db_file_name
+from src.utils.config import get_db_file_name, get_llm_provider
 from src.utils.database_handler import (
     get_cve_details,
     store_cves,
@@ -63,15 +63,21 @@ with refresh_col:
 
 # Sidebar with information about the tool
 st.sidebar.header("About this Tool")
+# Get current LLM provider for dynamic UI
+current_llm_provider = get_llm_provider()
+llm_display_name = "Gemini AI" if current_llm_provider == "gemini" else f"Local LLM ({current_llm_provider.title()})"
+
 st.sidebar.markdown(
-    """
+    f"""
 This tool allows you to look up information about a specific CVE (Common Vulnerabilities and Exposures).
 
 1. Enter a valid CVE ID in the format CVE-YYYY-NNNNN
 2. The tool will first check the local database for information
 3. You can fetch live data from external sources if needed
-4. Analyze the vulnerability with Gemini AI
+4. Analyze the vulnerability with {llm_display_name}
 5. Save the results to your local database
+
+**Current LLM Provider**: {current_llm_provider.title()}
 """
 )
 
@@ -100,8 +106,12 @@ with st.form(key="cve_lookup_form"):
 
 # Function to validate CVE ID format
 def is_valid_cve_id(cve_id: str) -> bool:
-    """Validate CVE ID format (CVE-YYYY-NNNNN where NNNNN can be multiple digits)"""
-    return bool(re.match(r"^CVE-\d{4}-\d+$", cve_id))
+    """Validate CVE ID format"""
+    if not cve_id:
+        return False
+    # CVE format: CVE-YYYY-NNNN (where YYYY is year and NNNN is at least 4 digits)
+    pattern = r"^CVE-\d{4}-\d{4,}$"
+    return bool(re.match(pattern, cve_id.upper()))
 
 
 # Function to display the results from the exploit search
@@ -194,8 +204,8 @@ def display_cve_details(cve_data: dict, source: str = "Local Database"):
     # Display badges for priority, KEV status, etc.
     badges_html = '<div style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px;">'
 
-    # Priority badge
-    priority = cve_data.get("gemini_priority")
+    # Priority badge (check both new and legacy field names)
+    priority = cve_data.get("llm_priority") or cve_data.get("gemini_priority")
     if priority:
         priority_colors = {
             "HIGH": "red",
@@ -318,31 +328,14 @@ def display_cve_details(cve_data: dict, source: str = "Local Database"):
             st.markdown(f"*...and {len(cpe_entries) - 10} more CPE entries*")
 
 
-# Add direct file logging for debugging
-def log_debug(message):
-    """Write debug message directly to a file for troubleshooting"""
-    operation_id = st.session_state.get("operation_id", str(uuid.uuid4())[:8])
-
-    # Set operation ID in session state if not present
-    if "operation_id" not in st.session_state:
-        st.session_state.operation_id = operation_id
-
-    try:
-        with open("debug.log", "a") as f:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            f.write(f"{timestamp} - [{operation_id}] {message}\n")
-    except Exception as e:
-        st.error(f"Error writing to debug log: {str(e)}")
-
-
 # Function to check database status
 def check_database_connection():
-    """Check if database is accessible and return status info"""
+    """Check if database connection is working"""
     try:
+        # Use the existing database handler
         db_path = get_db_file_name()
-        log_debug(f"Database path: {db_path}")
 
-        # Check if file exists
+        # Test connection by trying to connect to the database
         if not os.path.exists(db_path):
             return False, f"Database file does not exist at: {db_path}"
 
@@ -353,98 +346,46 @@ def check_database_connection():
         version = cursor.fetchone()[0]
         conn.close()
 
-        return True, f"Connected to SQLite version {version}, database at {db_path}"
+        return True, f"Connected to SQLite version {version}"
     except Exception as e:
-        log_debug(f"Database connection error: {str(e)}")
-        return False, f"Database error: {str(e)}"
+        return False, f"Database connection error: {str(e)}"
 
 
 # Function to save CVE to database
 def save_cve_to_database(cve_data):
-    """Save or update CVE data in the database with comprehensive error handling"""
-    cve_id = cve_data.get("cve_id", "Unknown")
-    log_debug(f"Attempting to save CVE {cve_id} to database")
+    """Save CVE data to the database with proper error handling"""
+    try:
+        cve_id = cve_data.get("cve_id")
 
-    # Add timestamp if not present
-    if "processed_at" not in cve_data:
-        cve_data["processed_at"] = datetime.now().isoformat()
-
-    # Add operation ID for tracking
-    cve_data["operation_id"] = st.session_state.operation_id
-
-    # Check database connection first
-    db_ok, db_message = check_database_connection()
-    if not db_ok:
-        log_debug(f"Database connection check failed: {db_message}")
-        st.error(f"Database connection issue: {db_message}")
-        return False
-
-    # Show pre-save status
-    with st.status(f"Saving {cve_id} to database...", expanded=True) as status:
-        try:
-            st.write("🔍 Checking database connection...")
-            log_debug(f"Database connection verified for {cve_id}")
-
-            st.write("💾 Executing save operation...")
-            # Use store_or_update_cve for reliable saving
-            save_result = store_or_update_cve(cve_data)
-            log_debug(f"store_or_update_cve result: {save_result}")
-
-            if not save_result:
-                st.write("❌ Save operation returned False")
-                log_debug(f"Save operation failed for {cve_id}")
-                status.update(label=f"❌ Failed to save {cve_id}", state="error")
-                return False
-
-            st.write("✅ Save operation completed")
-
-            # Verify the save by reading back from database
-            st.write("🔍 Verifying saved data...")
-            verification_data = get_cve_details(cve_id)
-            if verification_data:
-                log_debug(f"Verification successful - CVE found in database")
-                log_debug(f"Saved timestamp: {verification_data.get('processed_at')}")
-                st.write(
-                    f"✅ Verification successful - CVE found with timestamp: {verification_data.get('processed_at')}"
-                )
-
-                # Update session state
-                st.session_state.save_attempted = True
-                st.session_state.save_success = True
-                st.session_state.saved_cve_data = cve_data
-
-                status.update(label=f"✅ Successfully saved {cve_id}", state="complete")
-                return True
-            else:
-                log_debug(f"Verification failed - CVE not found in database after save")
-                st.write("❌ Verification failed - CVE not found in database")
-                st.warning("Save operation completed but verification failed - CVE not found in database")
-                status.update(label=f"⚠️ Save completed but verification failed for {cve_id}", state="error")
-                return False
-
-        except Exception as e:
-            error_msg = f"Exception during save operation: {str(e)}"
-            log_debug(error_msg)
-            log_debug(f"Stack trace: {traceback.format_exc()}")
-            st.write(f"❌ Error: {error_msg}")
-            st.error(f"Error saving to database: {str(e)}")
-            status.update(label=f"❌ Error saving {cve_id}", state="error")
+        # Check database connection first
+        db_ok, db_message = check_database_connection()
+        if not db_ok:
             return False
 
+        # Use the existing database handler
+        save_result = store_or_update_cve(cve_data)
 
-# Log session state at the start
-log_debug(
-    f"Page loaded/reloaded. Session state: save_attempted={st.session_state.save_attempted}, save_success={st.session_state.save_success}"
-)
+        if save_result:
+            # Verify the save by checking if we can retrieve it
+            verification_data = get_cve_details(cve_id)
+            if verification_data:
+                return True
+            else:
+                return False
+        else:
+            return False
+
+    except Exception as e:
+        error_msg = f"Error saving CVE {cve_data.get('cve_id', 'Unknown')} to database: {str(e)}"
+        st.error(error_msg)
+        return False
+
 
 # Main execution flow
 if lookup_button and cve_id:
-    # Validate the CVE ID format
     if not is_valid_cve_id(cve_id):
         st.error("Please enter a valid CVE ID in the format CVE-YYYY-NNNNN.")
     else:
-        log_debug(f"Looking up CVE: {cve_id}")
-
         # Check if we have a database connection
         db_ok, db_message = check_database_connection()
         if not db_ok:
@@ -475,17 +416,18 @@ if lookup_button and cve_id:
                     st.markdown("### Manual Risk Analysis")
                     st.info("The AI analyzer can help assess the risk of this vulnerability.")
 
-                    if st.button("Analyze with Gemini AI", type="primary"):
+                    if st.button(f"Analyze with {llm_display_name}", type="primary"):
                         with st.spinner("Running AI analysis..."):
                             try:
-                                # Run the Gemini analysis
-                                analysis_result = asyncio.run(analyze_cve_with_gemini_async(local_data))
+                                # Run the LLM analysis
+                                analysis_result = asyncio.run(analyze_cve_async(local_data))
 
                                 if analysis_result:
                                     st.success("Analysis completed!")
 
                                     # Update the database with the analysis results
-                                    update_result = update_cve_priority(cve_id, analysis_result[0], analysis_result[1])
+                                    priority, justification, raw_response = analysis_result
+                                    update_result = update_cve_priority(cve_id, priority, raw_response)
 
                                     if update_result:
                                         st.success("Database updated with analysis results")
@@ -502,7 +444,6 @@ if lookup_button and cve_id:
                                     st.error("Analysis failed. No results returned.")
                             except Exception as e:
                                 st.error(f"Error during analysis: {str(e)}")
-                                log_debug(f"Analysis error: {traceback.format_exc()}")
 
                 # Tab for updating the CVE data
                 with tabs[1]:
@@ -535,7 +476,6 @@ if lookup_button and cve_id:
                                         st.error(f"Could not find {cve_id} in NVD")
                                 except Exception as e:
                                     st.error(f"Error updating from NVD: {str(e)}")
-                                    log_debug(f"NVD update error: {traceback.format_exc()}")
 
                     with update_options[1]:
                         if st.button("Update EPSS Score", type="primary"):
@@ -555,7 +495,6 @@ if lookup_button and cve_id:
                                         st.error(f"Could not find EPSS data for {cve_id}")
                                 except Exception as e:
                                     st.error(f"Error fetching EPSS data: {str(e)}")
-                                    log_debug(f"EPSS update error: {traceback.format_exc()}")
 
                 # Tab for exploit search if requested
                 if use_github or use_exploitdb:
@@ -599,7 +538,6 @@ if lookup_button and cve_id:
                                             st.error("Failed to save exploit data to database")
                             except Exception as e:
                                 st.error(f"Error searching for exploits: {str(e)}")
-                                log_debug(f"Exploit search error: {traceback.format_exc()}")
 
             else:
                 # Not in local database, fetch from external sources
@@ -615,7 +553,6 @@ if lookup_button and cve_id:
                         nvd_data = fetch_single_cve_details(cve_id)
                         if nvd_data:
                             st.success(f"✅ Data successfully fetched from NVD!")
-                            log_debug(f"NVD data fetched successfully for {cve_id}")
                         else:
                             st.error(f"❌ Could not find {cve_id} in NVD database.")
                             st.info("💡 **Possible reasons:**")
@@ -623,7 +560,6 @@ if lookup_button and cve_id:
                             st.info("- The CVE was published very recently and not yet in NVD")
                             st.info("- There was a network error")
                             st.info("- Try a known CVE like CVE-2023-12345")
-                            log_debug(f"NVD lookup failed for {cve_id}")
                             st.stop()  # Stop execution if we can't find the CVE
 
                 # 2. Fetch EPSS score if NVD data was found
@@ -656,16 +592,19 @@ if lookup_button and cve_id:
                         except Exception as e:
                             st.error(f"Error checking KEV status: {str(e)}")
 
-                # 4. Run Gemini analysis if NVD data was found
+                # 4. Run LLM analysis if NVD data was found
                 if nvd_data:
-                    with st.spinner("Analyzing with Gemini AI..."):
+                    with st.spinner(f"Analyzing with {llm_display_name}..."):
                         try:
-                            analysis_result = asyncio.run(analyze_cve_with_gemini_async(nvd_data))
+                            analysis_result = asyncio.run(analyze_cve_async(nvd_data))
 
                             if analysis_result:
-                                priority, explanation = analysis_result
+                                priority, justification, raw_response = analysis_result
+                                nvd_data["llm_priority"] = priority
+                                nvd_data["llm_raw_response"] = raw_response
+                                # Keep backward compatibility
                                 nvd_data["gemini_priority"] = priority
-                                nvd_data["gemini_raw_response"] = explanation
+                                nvd_data["gemini_raw_response"] = raw_response
 
                                 # Display priority prominently in a colored box
                                 priority_colors = {
@@ -679,13 +618,13 @@ if lookup_button and cve_id:
                                 st.markdown(
                                     f"""
                                 <div style="background-color: {priority_color}; color: white; padding: 15px; border-radius: 5px; text-align: center; margin: 10px 0;">
-                                <span style="font-size: 20px; font-weight: bold;">Gemini Priority: {priority}</span>
+                                <span style="font-size: 20px; font-weight: bold;">{llm_display_name} Priority: {priority}</span>
                                 </div>
                                 """,
                                     unsafe_allow_html=True,
                                 )
                         except Exception as e:
-                            st.error(f"Error analyzing with Gemini: {str(e)}")
+                            st.error(f"Error analyzing with {llm_display_name}: {str(e)}")
 
                 # 5. Calculate risk score if NVD data was found
                 if nvd_data:
@@ -728,7 +667,6 @@ if lookup_button and cve_id:
                                 display_exploit_results(cve_id, exploit_results)
                         except Exception as e:
                             st.error(f"Error searching for exploits: {str(e)}")
-                            log_debug(f"Exploit search error: {traceback.format_exc()}")
 
                 # 7. Display details and save option
                 if nvd_data:
@@ -740,12 +678,9 @@ if lookup_button and cve_id:
                     st.markdown("## Analysis Results")
                     display_cve_details(nvd_data, source="Live Data")
 
-                    # Debug message
-                    log_debug(f"About to show save button for {cve_id}")
                     st.info("💾 You can now save this CVE to your database")
                 else:
                     st.error(f"Could not find {cve_id} in NVD database or an error occurred.")
-                    log_debug(f"No nvd_data available for {cve_id}, save button not shown")
 
 # Save button section - OUTSIDE the main lookup logic to avoid form interference
 if "current_cve_data" in st.session_state and st.session_state.current_cve_data:
@@ -759,14 +694,11 @@ if "current_cve_data" in st.session_state and st.session_state.current_cve_data:
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        # Add immediate debug logging before button check
         save_button_clicked = st.button(
             "💾 Save to database", type="primary", key=f"save_isolated_{current_cve_id}", use_container_width=True
         )
-        log_debug(f"Save button state for {current_cve_id}: {save_button_clicked}")
 
         if save_button_clicked:
-            log_debug(f"✅ BUTTON CLICKED! Save button clicked for {current_cve_id}")
             st.info("🎯 Save button was clicked! Processing...")
 
             try:
@@ -781,23 +713,11 @@ if "current_cve_data" in st.session_state and st.session_state.current_cve_data:
                     st.error("Failed to save to database")
             except Exception as e:
                 st.error(f"Error saving to database: {str(e)}")
-                log_debug(f"Save error for {current_cve_id}: {str(e)}")
 
     # Add explicit instructions
     st.markdown("**Instructions:**")
     st.markdown("1. ☝️ Click the blue 'Save to database' button above")
-    st.markdown("2. 📊 Check the debug section below for confirmation")
-    st.markdown("3. 🔍 Verify in the main dashboard that your CVE was saved")
-
-    # Test button for debugging
-    test_button_clicked = st.button("🔧 Test Save Function", key=f"test_isolated_{current_cve_id}")
-    log_debug(f"Test button state for {current_cve_id}: {test_button_clicked}")
-
-    if test_button_clicked:
-        log_debug(f"✅ TEST BUTTON CLICKED! Test save button clicked for {current_cve_id}")
-        st.info("🎯 Test button clicked! Check the debug logs to confirm this is working.")
-        st.session_state.save_attempted = True
-        st.session_state.save_success = False  # Mark as test
+    st.markdown("2. 🔍 Verify in the main dashboard that your CVE was saved")
 
 # Display saved CVE information
 if st.session_state.save_attempted and st.session_state.save_success and st.session_state.saved_cve_data:
@@ -808,70 +728,8 @@ if st.session_state.save_attempted and st.session_state.save_success and st.sess
     with st.expander("View saved data", expanded=False):
         saved_data = st.session_state.saved_cve_data
         st.markdown(f"**CVE ID:** {saved_data.get('cve_id')}")
-        st.markdown(f"**Priority:** {saved_data.get('gemini_priority', 'N/A')}")
+        priority = saved_data.get("llm_priority") or saved_data.get("gemini_priority", "N/A")
+        st.markdown(f"**Priority:** {priority}")
         st.markdown(f"**CVSS Score:** {saved_data.get('cvss_v3_score', 'N/A')}")
         st.markdown(f"**Risk Score:** {saved_data.get('risk_score', 'N/A')}")
         st.markdown(f"**Saved at:** {saved_data.get('processed_at', 'N/A')}")
-
-# Debug section
-st.markdown("---")
-with st.expander("🔧 Debug Information", expanded=False):
-    st.markdown("### Database Status")
-
-    # Check database connection
-    db_ok, db_message = check_database_connection()
-    if db_ok:
-        st.success(f"✅ {db_message}")
-    else:
-        st.error(f"❌ {db_message}")
-
-    # Show session state info
-    st.markdown("### Session State")
-    st.json(
-        {
-            "save_attempted": st.session_state.get("save_attempted", False),
-            "save_success": st.session_state.get("save_success", False),
-            "operation_id": st.session_state.get("operation_id", "None"),
-            "has_saved_data": st.session_state.get("saved_cve_data") is not None,
-        }
-    )
-
-    # Show recent debug log entries
-    st.markdown("### Recent Debug Logs")
-    try:
-        if os.path.exists("debug.log"):
-            with open("debug.log", "r") as f:
-                lines = f.readlines()
-                recent_lines = lines[-20:] if len(lines) > 20 else lines  # Show last 20 lines
-                if recent_lines:
-                    st.text_area("Debug Log (last 20 entries):", "\n".join(recent_lines), height=200)
-                else:
-                    st.info("Debug log is empty")
-        else:
-            st.info("Debug log file not found")
-    except Exception as e:
-        st.error(f"Error reading debug log: {str(e)}")
-
-    # Show database debug logs
-    st.markdown("### Database Debug Logs")
-    try:
-        if os.path.exists("database_debug.log"):
-            with open("database_debug.log", "r") as f:
-                lines = f.readlines()
-                recent_lines = lines[-20:] if len(lines) > 20 else lines  # Show last 20 lines
-                if recent_lines:
-                    st.text_area("Database Debug Log (last 20 entries):", "\n".join(recent_lines), height=200)
-                else:
-                    st.info("Database debug log is empty")
-        else:
-            st.info("Database debug log file not found")
-    except Exception as e:
-        st.error(f"Error reading database debug log: {str(e)}")
-
-    # Add button to clear session state
-    if st.button("Clear Session State", type="secondary"):
-        st.session_state.save_attempted = False
-        st.session_state.save_success = False
-        st.session_state.saved_cve_data = None
-        st.session_state.operation_id = str(uuid.uuid4())
-        st.rerun()

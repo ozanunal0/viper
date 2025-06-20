@@ -46,11 +46,12 @@ try:
             fetch_patch_tuesday_data,
         )
         from .clients.nvd_client import fetch_single_cve_details
-        from .gemini_analyzer import analyze_cve_with_gemini, analyze_cve_with_gemini_async
+        from .llm_analyzer import analyze_cve_async
         from .risk_analyzer import analyze_cve_risk, calculate_combined_risk_score, generate_alerts
         from .utils.config import (
             get_exa_general_queries,
             get_exa_results_per_query,
+            get_llm_provider,
             get_nvd_api_key,
         )
         from .utils.database_handler import (
@@ -76,8 +77,9 @@ try:
     except ImportError as e:
         print(f"Relative import failed: {e}, trying direct imports...", file=sys.stderr, flush=True)
         # Fallback for when running directly
-        from gemini_analyzer import analyze_cve_with_gemini, analyze_cve_with_gemini_async
+        from llm_analyzer import analyze_cve_async
         from risk_analyzer import analyze_cve_risk, calculate_combined_risk_score, generate_alerts
+        from utils.config import get_llm_provider
 
         try:
             from clients.cisa_kev_client import fetch_kev_catalog
@@ -236,8 +238,8 @@ class ViperMCPServer:
         """Register all available tools."""
         tools = {
             # Original tools
-            "get_gemini_cve_priority": {
-                "description": "Analyzes a CVE using Viper's Gemini integration to determine its priority (HIGH/MEDIUM/LOW). Example: 'Analyze CVE-2023-12345 with Gemini for priority assessment'",
+            "get_llm_cve_priority": {
+                "description": "Analyzes a CVE using Viper's LLM integration to determine its priority (HIGH/MEDIUM/LOW). Supports both Gemini and Ollama providers. Example: 'Analyze CVE-2023-12345 with AI for priority assessment'",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -259,8 +261,8 @@ class ViperMCPServer:
                     "required": ["cve_data"],
                 },
             },
-            "get_gemini_cve_analysis": {
-                "description": "Provides comprehensive AI-powered CVE analysis using Viper's Gemini integration. Example: 'Get detailed Gemini analysis for CVE-2024-0001'",
+            "get_llm_cve_analysis": {
+                "description": "Provides comprehensive AI-powered CVE analysis using Viper's LLM integration. Supports both Gemini and Ollama providers. Example: 'Get detailed AI analysis for CVE-2024-0001'",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -291,7 +293,7 @@ class ViperMCPServer:
                 },
             },
             "get_comprehensive_cve_analysis": {
-                "description": "Complete Viper analysis combining Gemini, risk scoring, and alerts. Example: 'Perform complete Viper analysis for CVE-2023-12345'",
+                "description": "Complete Viper analysis combining AI analysis, risk scoring, and alerts. Supports both Gemini and Ollama providers. Example: 'Perform complete Viper analysis for CVE-2023-12345'",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -329,9 +331,9 @@ class ViperMCPServer:
                             "description": "Search Exploit-DB for exploits",
                             "default": False,
                         },
-                        "run_gemini_analysis": {
+                        "run_llm_analysis": {
                             "type": "boolean",
-                            "description": "Perform Gemini AI analysis",
+                            "description": "Perform AI analysis using configured LLM provider",
                             "default": True,
                         },
                         "calculate_viper_risk": {
@@ -476,7 +478,7 @@ class ViperMCPServer:
                         },
                         "needing_analysis": {
                             "type": "boolean",
-                            "description": "Only return articles that need Gemini analysis",
+                            "description": "Only return articles that need AI analysis",
                             "default": False,
                         },
                     },
@@ -570,19 +572,20 @@ class ViperMCPServer:
         return tools
 
     # Original tool methods (keeping existing implementation)
-    async def get_gemini_cve_priority(self, cve_data: Dict[str, Any]) -> str:
-        """Get Gemini CVE priority assessment."""
+    async def get_llm_cve_priority(self, cve_data: Dict[str, Any]) -> str:
+        """Get LLM CVE priority assessment using configured provider."""
+        llm_provider = get_llm_provider()
         print(
-            f"[ViperMCP-Gemini] Processing priority request for {cve_data.get('cve_id', 'Unknown CVE')}...",
+            f"[ViperMCP-LLM] Processing priority request for {cve_data.get('cve_id', 'Unknown CVE')} using {llm_provider}...",
             file=sys.stderr,
             flush=True,
         )
 
         try:
-            priority, raw_response = await analyze_cve_with_gemini_async(cve_data)
+            priority, justification, raw_response = await analyze_cve_async(cve_data)
             cve_id = cve_data.get("cve_id", "Unknown CVE")
 
-            result = f"Gemini Priority Analysis for {cve_id}:\n"
+            result = f"AI Priority Analysis for {cve_id} (Provider: {llm_provider.title()}):\n"
             result += f"Priority: {priority}\n"
             result += f"Analysis Details: {raw_response}\n"
 
@@ -592,22 +595,24 @@ class ViperMCPServer:
             return result
 
         except Exception as e:
-            error_msg = f"Error during Gemini priority analysis: {str(e)}"
+            error_msg = f"Error during AI priority analysis: {str(e)}"
             print(error_msg, file=sys.stderr, flush=True)
             return error_msg
 
-    async def get_gemini_cve_analysis(self, cve_data: Dict[str, Any], use_async: bool = True) -> str:
-        """Get comprehensive Gemini CVE analysis."""
+    async def get_llm_cve_analysis(self, cve_data: Dict[str, Any], use_async: bool = True) -> str:
+        """Get comprehensive LLM CVE analysis using configured provider."""
+        llm_provider = get_llm_provider()
         cve_id = cve_data.get("cve_id", "Unknown CVE")
-        print(f"[ViperMCP-Gemini] Processing analysis request for {cve_id}...", file=sys.stderr, flush=True)
+        print(
+            f"[ViperMCP-LLM] Processing analysis request for {cve_id} using {llm_provider}...",
+            file=sys.stderr,
+            flush=True,
+        )
 
         try:
-            if use_async:
-                priority, raw_response = await analyze_cve_with_gemini_async(cve_data)
-            else:
-                priority, raw_response = await asyncio.to_thread(analyze_cve_with_gemini, cve_data)
+            priority, justification, raw_response = await analyze_cve_async(cve_data)
 
-            result = f"Comprehensive Gemini Analysis for {cve_id}:\n"
+            result = f"Comprehensive AI Analysis for {cve_id} (Provider: {llm_provider.title()}):\n"
             result += "=" * 50 + "\n"
             result += f"Priority Assessment: {priority}\n\n"
 
@@ -626,9 +631,18 @@ class ViperMCPServer:
             return result
 
         except Exception as e:
-            error_msg = f"Error during comprehensive Gemini analysis for {cve_id}: {str(e)}"
+            error_msg = f"Error during comprehensive AI analysis for {cve_id}: {str(e)}"
             print(error_msg, file=sys.stderr, flush=True)
             return error_msg
+
+    # Backward compatibility aliases
+    async def get_gemini_cve_priority(self, cve_data: Dict[str, Any]) -> str:
+        """Backward compatibility alias for get_llm_cve_priority."""
+        return await self.get_llm_cve_priority(cve_data)
+
+    async def get_gemini_cve_analysis(self, cve_data: Dict[str, Any], use_async: bool = True) -> str:
+        """Backward compatibility alias for get_llm_cve_analysis."""
+        return await self.get_llm_cve_analysis(cve_data, use_async)
 
     async def get_viper_risk_score(self, cve_data: Dict[str, Any]) -> str:
         """Calculate Viper risk score."""
@@ -696,15 +710,18 @@ class ViperMCPServer:
 
         try:
             # Run analyses concurrently
-            gemini_task = analyze_cve_with_gemini_async(cve_data)
+            gemini_task = analyze_cve_async(cve_data)
             risk_task = asyncio.to_thread(analyze_cve_risk, cve_data)
 
-            (gemini_priority, gemini_response), (risk_score, alerts) = await asyncio.gather(gemini_task, risk_task)
+            (gemini_priority, gemini_justification, gemini_response), (risk_score, alerts) = await asyncio.gather(
+                gemini_task, risk_task
+            )
 
             result = f"COMPREHENSIVE VIPER ANALYSIS FOR {cve_id}\n"
             result += "=" * 60 + "\n\n"
 
-            result += "🤖 GEMINI AI ANALYSIS:\n"
+            llm_provider = get_llm_provider()
+            result += f"🤖 AI ANALYSIS ({llm_provider.upper()}):\n"
             result += f"Priority: {gemini_priority}\n"
             result += f"Analysis: {gemini_response}\n\n"
 
@@ -739,7 +756,7 @@ class ViperMCPServer:
         use_cisa_kev: bool = True,
         search_github_exploits: bool = True,
         search_exploitdb: bool = False,
-        run_gemini_analysis: bool = True,
+        run_llm_analysis: bool = True,
         calculate_viper_risk: bool = True,
         save_to_db: bool = False,
         fetch_msrc_live: bool = True,
@@ -747,7 +764,7 @@ class ViperMCPServer:
         """
         Performs a comprehensive live lookup and analysis for a specified CVE ID.
         Fetches data from NVD, EPSS, CISA KEV, searches for public exploits,
-        runs Gemini AI analysis, calculates a risk score, and can save results to the database.
+        runs AI analysis (Gemini/Ollama), calculates a risk score, and can save results to the database.
         Control data sources and actions using the boolean flags.
         Example: 'Do a full live lookup for CVE-2024-1001 and save it to the database.'
         Or: 'Get live details for CVE-2024-2002 from NVD and EPSS only, don't save.'
@@ -757,7 +774,7 @@ class ViperMCPServer:
             f"[ViperMCP] Received perform_live_cve_lookup for {cve_id} with options: "
             f"force_live={force_live_fetch}, nvd={use_nvd}, epss={use_epss}, "
             f"kev={use_cisa_kev}, github={search_github_exploits}, exploitdb={search_exploitdb}, "
-            f"gemini={run_gemini_analysis}, risk={calculate_viper_risk}, save={save_to_db}, "
+            f"llm={run_llm_analysis}, risk={calculate_viper_risk}, save={save_to_db}, "
             f"msrc_live={fetch_msrc_live}",
             file=sys.stderr,
             flush=True,
@@ -940,16 +957,20 @@ class ViperMCPServer:
                     status_messages.append(f"❌ MSRC active fetch error: {str(e)}")
                     print(f"[ViperMCP] MSRC active fetch error for {cve_id}: {str(e)}", file=sys.stderr, flush=True)
 
-            if run_gemini_analysis and comprehensive_cve_data.get("description"):
+            if run_llm_analysis and comprehensive_cve_data.get("description"):
                 try:
-                    print(f"[ViperMCP] Running Gemini analysis for {cve_id}...", file=sys.stderr, flush=True)
-                    gemini_priority, gemini_response = await analyze_cve_with_gemini_async(comprehensive_cve_data)
-                    comprehensive_cve_data["gemini_priority"] = gemini_priority
-                    comprehensive_cve_data["gemini_raw_response"] = gemini_response
-                    status_messages.append(f"✅ Gemini analysis: {gemini_priority}")
+                    llm_provider = get_llm_provider()
+                    print(f"[ViperMCP] Running {llm_provider} analysis for {cve_id}...", file=sys.stderr, flush=True)
+                    llm_priority, llm_justification, llm_response = await analyze_cve_async(comprehensive_cve_data)
+                    comprehensive_cve_data["llm_priority"] = llm_priority
+                    comprehensive_cve_data["llm_raw_response"] = llm_response
+                    # Keep backward compatibility with gemini fields
+                    comprehensive_cve_data["gemini_priority"] = llm_priority
+                    comprehensive_cve_data["gemini_raw_response"] = llm_response
+                    status_messages.append(f"✅ {llm_provider.title()} analysis: {llm_priority}")
                 except Exception as e:
-                    status_messages.append(f"❌ Gemini analysis error: {str(e)}")
-                    print(f"[ViperMCP] Gemini analysis error: {str(e)}", file=sys.stderr, flush=True)
+                    status_messages.append(f"❌ AI analysis error: {str(e)}")
+                    print(f"[ViperMCP] AI analysis error: {str(e)}", file=sys.stderr, flush=True)
 
             if calculate_viper_risk and comprehensive_cve_data.get("description"):
                 try:
@@ -986,7 +1007,8 @@ class ViperMCPServer:
                     "in_kev": comprehensive_cve_data.get("is_in_kev", False),
                     "exploit_count": len(comprehensive_cve_data.get("exploit_references", [])),
                     "risk_score": comprehensive_cve_data.get("risk_score"),
-                    "gemini_priority": comprehensive_cve_data.get("gemini_priority"),
+                    "llm_priority": comprehensive_cve_data.get("llm_priority"),
+                    "gemini_priority": comprehensive_cve_data.get("gemini_priority"),  # backward compatibility
                     "live_msrc_data_retrieved": "live_msrc_details" in comprehensive_cve_data,
                 },
             }
@@ -1452,7 +1474,7 @@ class ViperMCPServer:
 
         try:
             if needing_analysis:
-                # Get articles that need Gemini analysis
+                # Get articles that need AI analysis
                 articles = await asyncio.to_thread(get_articles_needing_analysis)
                 filter_description = "articles needing analysis"
             elif cve_id:
