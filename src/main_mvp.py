@@ -19,7 +19,7 @@ from src.clients.microsoft_update_client import (
     fetch_patch_tuesday_data,
 )
 from src.clients.nvd_client import fetch_recent_cves
-from src.gemini_analyzer import analyze_cve_with_gemini_async
+from src.llm_analyzer import analyze_cve_async
 from src.risk_analyzer import analyze_cve_risk, calculate_combined_risk_score, generate_alerts
 
 # Import configuration getters
@@ -330,7 +330,7 @@ async def process_cve(cve, semaphore):
             logger.info(f"Processing CVE: {cve_id}")
 
             # Analyze the CVE asynchronously
-            priority, raw_response = await analyze_cve_with_gemini_async(cve)
+            priority, justification, raw_response = await analyze_cve_async(cve)
 
             # Update the database with the priority (database operations are synchronous)
             update_cve_priority(cve_id, priority, raw_response)
@@ -751,7 +751,7 @@ def run_cti_feed(days_back=None, scan_all_exploits=False, max_cves_for_exploit_s
 
                 if processed_exploit_count > 0:
                     print(
-                        f"\nSearched for public exploits for {processed_exploit_count} HIGH priority CVEs, found exploits for {found_exploit_count} CVEs."
+                        f"\nSearched for public exploits for {processed_exploit_count} HIGH priority CVEs, found exploits for {found_exploit_count} CVes."
                     )
             else:
                 logger.info("No HIGH priority CVEs found, skipping exploit search")
@@ -766,7 +766,7 @@ def run_cti_feed(days_back=None, scan_all_exploits=False, max_cves_for_exploit_s
                 )
                 if all_processed_count > 0:
                     print(
-                        f"\nScanned {all_processed_count} CVEs for public exploits, found exploits for {all_found_count} CVEs."
+                        f"\nScanned {all_processed_count} CVes for public exploits, found exploits for {all_found_count} CVes."
                     )
 
             # Step 10: Calculate risk scores and generate alerts
@@ -789,19 +789,19 @@ def run_cti_feed(days_back=None, scan_all_exploits=False, max_cves_for_exploit_s
                 print(f"\nStored {articles_stored} threat intelligence articles from semantic searches.")
 
             print(f"\n{'=' * 80}")
-            print(f"FOUND {len(priority_cves)} HIGH/MEDIUM PRIORITY CVEs")
+            print(f"FOUND {len(priority_cves)} HIGH/MEDIUM PRIORITY CVes")
             print(f"{'=' * 80}")
 
             for cve in priority_cves:
                 display_cve(cve)
 
-            # Step 12: Display CVEs with alerts
+            # Step 12: Display CVes with alerts
             if cves_with_alerts_count > 0:
-                logger.info("Retrieving and displaying CVEs with alerts")
+                logger.info("Retrieving and displaying CVes with alerts")
                 cves_with_alerts = get_cves_with_alerts()
 
                 print(f"\n{'=' * 80}")
-                print(f"⚠️  ALERTS DETECTED FOR {len(cves_with_alerts)} CVEs ⚠️")
+                print(f"⚠️  ALERTS DETECTED FOR {len(cves_with_alerts)} CVes ⚠️")
                 print(f"{'=' * 80}")
 
                 for cve in cves_with_alerts:
