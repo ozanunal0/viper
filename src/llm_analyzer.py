@@ -45,6 +45,67 @@ def configure_gemini():
         raise
 
 
+def _extract_cve_data_for_prompt(cve_data: dict) -> dict:
+    """
+    Extracts and formats CVE data for prompt generation.
+    This function eliminates code duplication between different prompt creators.
+
+    Args:
+        cve_data (dict): CVE information dictionary
+
+    Returns:
+        dict: Formatted CVE data ready for prompt generation
+    """
+    # Extract basic CVE information
+    cve_id = cve_data.get("cve_id", "Unknown CVE")
+    cvss_score = cve_data.get("cvss_v3_score", "Not available")
+    description = cve_data.get("description", "No description available")
+
+    # Extract EPSS data if available
+    epss_score = cve_data.get("epss_score")
+    epss_percentile = cve_data.get("epss_percentile")
+    epss_info = "Not available"
+    if epss_score is not None and epss_percentile is not None:
+        epss_info = f"{epss_score:.4f} (Exploitation probability in the {epss_percentile:.2%} percentile)"
+
+    # Extract CISA KEV data if available
+    is_in_kev = cve_data.get("is_in_kev", False)
+    kev_date_added = cve_data.get("kev_date_added")
+    kev_info = "No"
+    if is_in_kev:
+        kev_info = f"Yes, added on {kev_date_added}" if kev_date_added else "Yes"
+
+    # Extract Microsoft-specific information if available
+    ms_severity = cve_data.get("microsoft_severity", "N/A")
+    ms_product_family = cve_data.get("microsoft_product_family", "N/A")
+    ms_product_name = cve_data.get("microsoft_product_name", "N/A")
+    patch_tuesday_date = cve_data.get("patch_tuesday_date", "N/A")
+
+    # Extract exploit information if available
+    has_public_exploit = cve_data.get("has_public_exploit", False)
+    exploit_references = cve_data.get("exploit_references", [])
+    exploit_info = "No"
+    if has_public_exploit and exploit_references:
+        if isinstance(exploit_references, list):
+            sources = set(exploit.get("source", "Unknown") for exploit in exploit_references)
+            exploit_info = f"Yes, {len(exploit_references)} exploit(s) found on {', '.join(sources)}"
+        else:
+            exploit_info = "Yes, exploits available"
+
+    return {
+        "cve_id": cve_id,
+        "cvss_score": cvss_score,
+        "description": description,
+        "epss_info": epss_info,
+        "kev_info": kev_info,
+        "ms_severity": ms_severity,
+        "ms_product_family": ms_product_family,
+        "ms_product_name": ms_product_name,
+        "patch_tuesday_date": patch_tuesday_date,
+        "exploit_info": exploit_info,
+    }
+
+
 @retry(
     retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)),
     wait=wait_exponential(
@@ -193,53 +254,22 @@ def _create_ollama_prompt(cve_data: dict) -> str:
     Returns:
         str: Formatted prompt for Ollama
     """
-    # Extract CVE information
-    cve_id = cve_data.get("cve_id", "Unknown CVE")
-    cvss_score = cve_data.get("cvss_v3_score", "Not available")
-    description = cve_data.get("description", "No description available")
-
-    # Extract EPSS data if available
-    epss_score = cve_data.get("epss_score")
-    epss_percentile = cve_data.get("epss_percentile")
-    epss_info = "Not available"
-    if epss_score is not None and epss_percentile is not None:
-        epss_info = f"{epss_score:.4f} (Exploitation probability in the {epss_percentile:.2%} percentile)"
-
-    # Extract CISA KEV data if available
-    is_in_kev = cve_data.get("is_in_kev", False)
-    kev_date_added = cve_data.get("kev_date_added")
-    kev_info = "No"
-    if is_in_kev:
-        kev_info = f"Yes, added on {kev_date_added}" if kev_date_added else "Yes"
-
-    # Extract Microsoft-specific information if available
-    ms_severity = cve_data.get("microsoft_severity", "N/A")
-    ms_product_family = cve_data.get("microsoft_product_family", "N/A")
-
-    # Extract exploit information if available
-    has_public_exploit = cve_data.get("has_public_exploit", False)
-    exploit_references = cve_data.get("exploit_references", [])
-    exploit_info = "No"
-    if has_public_exploit and exploit_references:
-        if isinstance(exploit_references, list):
-            sources = set(exploit.get("source", "Unknown") for exploit in exploit_references)
-            exploit_info = f"Yes, {len(exploit_references)} exploit(s) found on {', '.join(sources)}"
-        else:
-            exploit_info = "Yes, exploits available"
+    # Extract CVE data using shared function
+    data = _extract_cve_data_for_prompt(cve_data)
 
     # Create a prompt optimized for local models with clear structure
     prompt = f"""<analysis>
 You are a cybersecurity expert analyzing vulnerability data. Analyze the following CVE and determine its priority for a typical mid-to-large organization.
 
 CVE Information:
-- CVE ID: {cve_id}
-- CVSS v3 Score: {cvss_score}
-- EPSS Score: {epss_info}
-- In CISA KEV Catalog: {kev_info}
-- Microsoft Severity: {ms_severity}
-- Microsoft Product Family: {ms_product_family}
-- Public Exploits Available: {exploit_info}
-- Description: {description}
+- CVE ID: {data['cve_id']}
+- CVSS v3 Score: {data['cvss_score']}
+- EPSS Score: {data['epss_info']}
+- In CISA KEV Catalog: {data['kev_info']}
+- Microsoft Severity: {data['ms_severity']}
+- Microsoft Product Family: {data['ms_product_family']}
+- Public Exploits Available: {data['exploit_info']}
+- Description: {data['description']}
 
 Based on this information, consider:
 1. Impact severity (RCE, data breach, DoS)
@@ -301,57 +331,24 @@ def _create_gemini_prompt(cve_data: dict) -> str:
     Returns:
         str: Formatted prompt for Gemini
     """
-    # Extract CVE information
-    cve_id = cve_data.get("cve_id", "Unknown CVE")
-    cvss_score = cve_data.get("cvss_v3_score", "Not available")
-    description = cve_data.get("description", "No description available")
-
-    # Extract EPSS data if available
-    epss_score = cve_data.get("epss_score")
-    epss_percentile = cve_data.get("epss_percentile")
-    epss_info = "Not available"
-    if epss_score is not None and epss_percentile is not None:
-        epss_info = f"{epss_score:.4f} (Exploitation probability in the {epss_percentile:.2%} percentile)"
-
-    # Extract CISA KEV data if available
-    is_in_kev = cve_data.get("is_in_kev", False)
-    kev_date_added = cve_data.get("kev_date_added")
-    kev_info = "No"
-    if is_in_kev:
-        kev_info = f"Yes, added on {kev_date_added}" if kev_date_added else "Yes"
-
-    # Extract Microsoft-specific information if available
-    ms_severity = cve_data.get("microsoft_severity", "N/A")
-    ms_product_family = cve_data.get("microsoft_product_family", "N/A")
-    ms_product_name = cve_data.get("microsoft_product_name", "N/A")
-    patch_tuesday_date = cve_data.get("patch_tuesday_date", "N/A")
-
-    # Extract exploit information if available
-    has_public_exploit = cve_data.get("has_public_exploit", False)
-    exploit_references = cve_data.get("exploit_references", [])
-    exploit_info = "No"
-    if has_public_exploit and exploit_references:
-        if isinstance(exploit_references, list):
-            sources = set(exploit.get("source", "Unknown") for exploit in exploit_references)
-            exploit_info = f"Yes, {len(exploit_references)} exploit(s) found on {', '.join(sources)}"
-        else:
-            exploit_info = "Yes, exploits available"
+    # Extract CVE data using shared function
+    data = _extract_cve_data_for_prompt(cve_data)
 
     # Construct the prompt
     prompt = f"""
 Analyze the following CVE information to determine its priority for a typical mid-to-large sized organization. Consider potential impact (RCE, data breach, DoS), ubiquity of the affected software, and reported exploitation (if any can be inferred).
 Respond with only ONE of the following words: HIGH, MEDIUM, or LOW.
 
-CVE ID: {cve_id}
-CVSS v3 Score: {cvss_score}
-EPSS Score: {epss_info}
-In CISA KEV (Known Exploited Vulnerabilities Catalog): {kev_info}
-Microsoft Severity: {ms_severity}
-Affected Microsoft Product Family: {ms_product_family}
-Specific Microsoft Product: {ms_product_name}
-Microsoft Patch Tuesday Date: {patch_tuesday_date}
-Public Exploits Available: {exploit_info}
-Description: {description}
+CVE ID: {data['cve_id']}
+CVSS v3 Score: {data['cvss_score']}
+EPSS Score: {data['epss_info']}
+In CISA KEV (Known Exploited Vulnerabilities Catalog): {data['kev_info']}
+Microsoft Severity: {data['ms_severity']}
+Affected Microsoft Product Family: {data['ms_product_family']}
+Specific Microsoft Product: {data['ms_product_name']}
+Microsoft Patch Tuesday Date: {data['patch_tuesday_date']}
+Public Exploits Available: {data['exploit_info']}
+Description: {data['description']}
 
 Priority:
 """
