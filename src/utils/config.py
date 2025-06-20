@@ -696,36 +696,94 @@ def get_exa_results_per_query():
 
 def get_exa_general_queries():
     """
-    Retrieves the list of general threat intelligence queries for EXA searches.
-    Returns a default list if not specified.
+    Retrieves the general EXA AI queries configuration as a list.
+    Returns an empty list if not specified or invalid.
 
     Returns:
-        list: List of general queries to search for
+        list: List of general query strings
     """
     queries_str = os.getenv("EXA_GENERAL_QUERIES", "")
 
     if not queries_str:
-        default = [
-            "latest ransomware TTPs and techniques",
-            "new phishing campaigns targeting financial sector",
-            "recent APT group activities and campaigns",
-            "zero-day vulnerability exploitation trends",
-            "emerging cybersecurity threats and IOCs",
-        ]
-        logger.info("EXA_GENERAL_QUERIES not found. Using default queries")
-        return default
+        logger.warning("EXA_GENERAL_QUERIES not found in environment variables. Using empty list.")
+        return []
 
     try:
-        # Parse comma-separated queries
+        # Split by commas and strip whitespace
         queries = [query.strip() for query in queries_str.split(",") if query.strip()]
-        return queries if queries else []
-    except Exception:
-        default = [
-            "latest ransomware TTPs and techniques",
-            "new phishing campaigns targeting financial sector",
-            "recent APT group activities and campaigns",
-            "zero-day vulnerability exploitation trends",
-            "emerging cybersecurity threats and IOCs",
-        ]
-        logger.warning("Error parsing EXA_GENERAL_QUERIES. Using default queries")
+        return queries
+    except Exception as e:
+        logger.warning(f"Error parsing EXA_GENERAL_QUERIES: {str(e)}. Using empty list.")
+        return []
+
+
+def get_llm_provider(default="gemini"):
+    """
+    Retrieves the LLM provider setting from environment variables.
+    Defaults to 'gemini' if not specified.
+
+    Args:
+        default (str): Default LLM provider if not configured
+
+    Returns:
+        str: The LLM provider name in lowercase ('gemini' or 'ollama')
+    """
+    provider = os.getenv("LLM_PROVIDER", "").lower().strip()
+
+    if not provider:
+        logger.warning(f"LLM_PROVIDER not found in environment variables. Using default: {default}")
+        return default.lower()
+
+    # Validate provider
+    valid_providers = ["gemini", "ollama"]
+    if provider not in valid_providers:
+        logger.warning(f"Invalid LLM_PROVIDER '{provider}'. Must be one of {valid_providers}. Using default: {default}")
+        return default.lower()
+
+    logger.info(f"Using LLM provider: {provider}")
+    return provider
+
+
+def get_ollama_api_base_url(default="http://localhost:11434"):
+    """
+    Retrieves the Ollama API base URL from environment variables.
+    Defaults to 'http://localhost:11434' if not specified.
+
+    Args:
+        default (str): Default Ollama API base URL if not configured
+
+    Returns:
+        str: The Ollama API base URL
+    """
+    base_url = os.getenv("OLLAMA_API_BASE_URL", "").strip()
+
+    if not base_url:
+        logger.warning(f"OLLAMA_API_BASE_URL not found in environment variables. Using default: {default}")
         return default
+
+    # Remove trailing slash if present
+    base_url = base_url.rstrip("/")
+
+    logger.info(f"Using Ollama API base URL: {base_url}")
+    return base_url
+
+
+def get_local_llm_model_name(default="llama3:8b"):
+    """
+    Retrieves the local LLM model name from environment variables.
+    Defaults to 'llama3:8b' if not specified.
+
+    Args:
+        default (str): Default model name if not configured
+
+    Returns:
+        str: The local LLM model name
+    """
+    model_name = os.getenv("LOCAL_LLM_MODEL_NAME", "").strip()
+
+    if not model_name:
+        logger.warning(f"LOCAL_LLM_MODEL_NAME not found in environment variables. Using default: {default}")
+        return default
+
+    logger.info(f"Using local LLM model: {model_name}")
+    return model_name
