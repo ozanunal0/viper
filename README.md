@@ -8,6 +8,7 @@
 [![Docker Support](https://img.shields.io/badge/Docker-Supported-blue?logo=docker)](https://www.docker.com/)
 [![MCP Support](https://img.shields.io/badge/Claude_Desktop-MCP_Integration-purple?logo=anthropic)](https://modelcontextprotocol.io/)
 [![Tests: Passing](https://img.shields.io/badge/Tests-Passing-brightgreen.svg)]()
+[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=ozanunal0_viper&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=ozanunal0_viper)
 ![visitors](https://visitor-badge.laobi.icu/badge?page_id=ozanunal0.viper)
 
 </div>
