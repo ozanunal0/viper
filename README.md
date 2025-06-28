@@ -1,3 +1,5 @@
+![VIPER Project Banner](public/viper-banner.png)
+
 <div align="center">
 
   <img  src="https://img.shields.io/github/last-commit/ozanunal0/viper?style=flat-square&logo=git&logoColor=white" alt="Last Commit">
