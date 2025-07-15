@@ -449,3 +449,13 @@ async def find_similar_threat_articles(
         logger.error(f"Error finding similar articles for '{reference_url}': {str(e)}")
         # Re-raise to trigger retry mechanism
         raise
+
+
+def is_exa_client_available() -> bool:
+    """
+    Checks if the EXA client was successfully initialized.
+
+    Returns:
+        bool: True if the client is initialized and ready, False otherwise.
+    """
+    return exa is not None

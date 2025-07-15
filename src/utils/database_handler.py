@@ -850,7 +850,8 @@ def get_filtered_cves(
             params.append(1 if has_public_exploit else 0)
 
         if keyword:
-            query += " AND description LIKE ?"
+            query += " AND (description LIKE ? OR cve_id LIKE ?)"
+            params.append(f"%{keyword}%")
             params.append(f"%{keyword}%")
 
         # Microsoft-specific filters

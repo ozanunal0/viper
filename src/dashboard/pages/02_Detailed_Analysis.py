@@ -117,8 +117,17 @@ if "patch_tuesday_date" in df.columns:
 # Get a list of CVE IDs for selection
 cve_list = df["cve_id"].tolist()
 
+# Check if a specific CVE was requested via URL parameter
+query_params = st.query_params
+requested_cve = query_params.get("selected_cve")
+
+# Determine the default index for the selectbox
+default_index = 0
+if requested_cve and requested_cve in cve_list:
+    default_index = cve_list.index(requested_cve)
+
 # Right-side selection box
-selected_cve = st.selectbox("Select a vulnerability for detailed analysis:", options=cve_list, index=0)
+selected_cve = st.selectbox("Select a vulnerability for detailed analysis:", options=cve_list, index=default_index)
 
 # Get the selected CVE data
 selected_data = df[df["cve_id"] == selected_cve].iloc[0].to_dict()
