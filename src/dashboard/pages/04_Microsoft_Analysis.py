@@ -81,17 +81,24 @@ if "microsoft_product_family" in df.columns:
 
 # Date range filter
 if "patch_tuesday_date" in df.columns:
-    min_date = df["patch_tuesday_date"].min().date()
-    max_date = df["patch_tuesday_date"].max().date()
+    # Check if there are any valid dates in the column
+    valid_dates = df["patch_tuesday_date"].dropna()
 
-    date_range = st.sidebar.date_input(
-        "Patch Tuesday Date Range",
-        value=(min_date, max_date),
-        min_value=min_date,
-        max_value=max_date,
-    )
+    if not valid_dates.empty:
+        min_date = valid_dates.min().date()
+        max_date = valid_dates.max().date()
 
-    if len(date_range) == 2:
+        date_range = st.sidebar.date_input(
+            "Patch Tuesday Date Range",
+            value=(min_date, max_date),
+            min_value=min_date,
+            max_value=max_date,
+        )
+    else:
+        st.sidebar.info("No valid Patch Tuesday dates available for filtering.")
+        date_range = None
+
+    if date_range is not None and len(date_range) == 2:
         start_date, end_date = date_range
         if start_date and end_date:
             # First drop rows with NaN patch_tuesday_date to avoid the .dt accessor error
@@ -176,21 +183,37 @@ with severity_cols[0]:
 
 with severity_cols[1]:
     if "patch_tuesday_date" in df.columns and "microsoft_severity" in df.columns:
-        # Group by month and severity
-        df["month"] = df["patch_tuesday_date"].dt.to_period("M")
-        severity_by_month = df.groupby(["month", "microsoft_severity"]).size().unstack(fill_value=0).reset_index()
-        severity_by_month["month_start"] = severity_by_month["month"].dt.to_timestamp()
+        # Only proceed if we have valid dates
+        df_valid_dates = df.dropna(subset=["patch_tuesday_date"])
 
-        # Create stacked bar chart
-        fig_severity_time = px.bar(
-            severity_by_month,
-            x="month_start",
-            y=["Critical", "Important", "Moderate", "Low"],
-            title="Severity Distribution by Month",
-            labels={"value": "Number of CVEs", "month_start": "Month"},
-            color_discrete_map=colors,
-        )
-        st.plotly_chart(fig_severity_time, use_container_width=True)
+        if not df_valid_dates.empty:
+            # Group by month and severity
+            df_valid_dates["month"] = df_valid_dates["patch_tuesday_date"].dt.to_period("M")
+            severity_by_month = (
+                df_valid_dates.groupby(["month", "microsoft_severity"]).size().unstack(fill_value=0).reset_index()
+            )
+            severity_by_month["month_start"] = severity_by_month["month"].dt.to_timestamp()
+
+            # Get available severity columns (some might be missing)
+            available_severities = [
+                col for col in ["Critical", "Important", "Moderate", "Low"] if col in severity_by_month.columns
+            ]
+
+            if available_severities:
+                # Create stacked bar chart
+                fig_severity_time = px.bar(
+                    severity_by_month,
+                    x="month_start",
+                    y=available_severities,
+                    title="Severity Distribution by Month",
+                    labels={"value": "Number of CVEs", "month_start": "Month"},
+                    color_discrete_map=colors,
+                )
+                st.plotly_chart(fig_severity_time, use_container_width=True)
+            else:
+                st.info("No severity data available for time series chart.")
+        else:
+            st.info("No valid patch Tuesday dates available for time series analysis.")
 
 # Product distribution
 st.subheader("Product Analysis")

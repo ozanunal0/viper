@@ -535,3 +535,307 @@ async def check_ollama_availability() -> Tuple[bool, str, list]:
         return False, f"Cannot connect to Ollama: {str(e)}", []
     except Exception as e:
         return False, f"Error checking Ollama: {str(e)}", []
+
+
+def _clean_json_response(response: str) -> str:
+    """
+    Attempts to clean and extract valid JSON from LLM response.
+
+    Args:
+        response (str): The raw response from the LLM
+
+    Returns:
+        str: Cleaned JSON string or empty string if not found
+    """
+    try:
+        # Remove markdown code blocks
+        if "```json" in response:
+            start = response.find("```json") + 7
+            end = response.find("```", start)
+            if end != -1:
+                response = response[start:end].strip()
+        elif "```" in response:
+            start = response.find("```") + 3
+            end = response.find("```", start)
+            if end != -1:
+                response = response[start:end].strip()
+
+        # Try to find JSON object boundaries
+        start_idx = response.find("{")
+        end_idx = response.rfind("}")
+
+        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+            response = response[start_idx : end_idx + 1]
+
+        return response.strip()
+    except Exception as e:
+        logger.warning(f"Error cleaning JSON response: {str(e)}")
+        return ""
+
+
+def _create_article_analysis_prompt(article_text: str) -> str:
+    """
+    Creates a prompt for analyzing cybersecurity article content.
+
+    Args:
+        article_text (str): The article text to analyze
+
+    Returns:
+        str: Formatted prompt for article analysis
+    """
+    # Truncate article text if too long (limit to ~8000 chars to leave room for prompt)
+    if len(article_text) > 8000:
+        article_text = article_text[:8000] + "... [TRUNCATED]"
+
+    prompt = f"""Analyze the following cybersecurity article. Extract key threat intelligence information and provide the output ONLY in a valid JSON format with the specified keys.
+
+Article Text:
+---
+{article_text}
+---
+
+JSON Output Schema:
+{{
+  "summary": "A concise, 2-3 sentence summary of the article's main findings, focusing on the threat, vulnerability, or campaign.",
+  "extracted_iocs": [
+    {{ "value": "1.2.3.4", "type": "ipv4" }},
+    {{ "value": "badsite.com", "type": "domain" }},
+    {{ "value": "a1b2c3d4...", "type": "sha256" }}
+  ],
+  "mentioned_actors": ["APT Name", "Cybercrime Group"],
+  "mentioned_malware": ["MalwareFamily1", "Backdoor.Name"],
+  "identified_ttps": ["T1566.001", "T1059.003"],
+  "target_sectors": ["Financial", "Government"]
+}}
+
+Provide ONLY the JSON response, no additional text or explanations."""
+
+    return prompt
+
+
+@retry(
+    retry=retry_if_exception_type(
+        (
+            google_exceptions.ServiceUnavailable,
+            google_exceptions.DeadlineExceeded,
+            google_exceptions.ResourceExhausted,
+            google_exceptions.TooManyRequests,
+        )
+    ),
+    wait=wait_exponential(
+        multiplier=get_retry_wait_multiplier(),
+        min=get_retry_wait_min_seconds(),
+        max=get_retry_wait_max_seconds(),
+    ),
+    stop=stop_after_attempt(get_retry_max_attempts()),
+    before_sleep=lambda retry_state: logger.warning(
+        f"Retrying article analysis API call after error: {retry_state.outcome.exception()}. "
+        f"Attempt {retry_state.attempt_number}/{get_retry_max_attempts()}"
+    ),
+)
+async def _analyze_article_with_gemini_async(prompt: str) -> Optional[dict]:
+    """
+    Analyzes article content using Gemini API.
+
+    Args:
+        prompt (str): The analysis prompt
+
+    Returns:
+        Optional[dict]: Parsed analysis results or None on error
+    """
+    try:
+        # Configure Gemini API
+        configure_gemini()
+
+        # Initialize Gemini model
+        model = genai.GenerativeModel(get_gemini_model_name())
+
+        logger.info("Sending article to Gemini for analysis")
+        response = await model.generate_content_async(prompt)
+
+        # Get the response text
+        raw_response = response.text.strip()
+
+        # Clean and parse JSON response
+        cleaned_response = _clean_json_response(raw_response)
+
+        if not cleaned_response:
+            logger.error("Failed to extract JSON from Gemini response")
+            return None
+
+        try:
+            result = json.loads(cleaned_response)
+            logger.info("Successfully analyzed article with Gemini")
+            return result
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON from Gemini response: {str(e)}")
+            logger.debug(f"Raw response: {raw_response[:200]}...")
+            return None
+
+    except Exception as e:
+        logger.error(f"Error analyzing article with Gemini: {str(e)}")
+        return None
+
+
+@retry(
+    retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)),
+    wait=wait_exponential(
+        multiplier=get_retry_wait_multiplier(),
+        min=get_retry_wait_min_seconds(),
+        max=get_retry_wait_max_seconds(),
+    ),
+    stop=stop_after_attempt(get_retry_max_attempts()),
+    before_sleep=lambda retry_state: logger.warning(
+        f"Retrying article analysis with Ollama after error: {retry_state.outcome.exception()}. "
+        f"Attempt {retry_state.attempt_number}/{get_retry_max_attempts()}"
+    ),
+)
+async def _analyze_article_with_ollama_async(prompt: str) -> Optional[dict]:
+    """
+    Analyzes article content using Ollama API.
+
+    Args:
+        prompt (str): The analysis prompt
+
+    Returns:
+        Optional[dict]: Parsed analysis results or None on error
+    """
+    try:
+        base_url = get_ollama_api_base_url()
+        model_name = get_local_llm_model_name()
+        url = f"{base_url}/api/generate"
+
+        # Payload optimized for structured JSON output
+        payload = {
+            "model": model_name,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.1,  # Low temperature for consistent structured output
+                "top_p": 0.9,
+                "num_predict": 1000,  # Allow longer response for JSON
+                "stop": ["\n\n---", "Human:", "Assistant:"],
+            },
+        }
+
+        logger.info(f"Sending article to Ollama ({model_name}) for analysis")
+
+        timeout = aiohttp.ClientTimeout(total=180)  # 3 minute timeout for article analysis
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=payload) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    logger.error(f"Ollama API returned status {response.status}: {error_text}")
+                    return None
+
+                result = await response.json()
+
+                # Check for API-level errors
+                if "error" in result:
+                    logger.error(f"Ollama API error: {result['error']}")
+                    return None
+
+                raw_response = result.get("response", "").strip()
+
+                if not raw_response:
+                    logger.error("Empty response from Ollama")
+                    return None
+
+                # Clean and parse JSON response
+                cleaned_response = _clean_json_response(raw_response)
+
+                if not cleaned_response:
+                    logger.error("Failed to extract JSON from Ollama response")
+                    return None
+
+                try:
+                    result = json.loads(cleaned_response)
+                    logger.info("Successfully analyzed article with Ollama")
+                    return result
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse JSON from Ollama response: {str(e)}")
+                    logger.debug(f"Raw response: {raw_response[:200]}...")
+                    return None
+
+    except asyncio.TimeoutError:
+        logger.error("Timeout waiting for Ollama article analysis response")
+        return None
+    except aiohttp.ClientError as e:
+        logger.error(f"HTTP client error during Ollama article analysis: {str(e)}")
+        return None
+    except Exception as e:
+        logger.error(f"Error analyzing article with Ollama: {str(e)}")
+        return None
+
+
+async def analyze_article_content_async(article_text: str) -> Optional[dict]:
+    """
+    Analyzes cybersecurity article content to extract threat intelligence information.
+
+    Acts as a senior cyber threat analyst to extract structured information including:
+    - Summary of main findings
+    - IOCs (indicators of compromise)
+    - Threat actors mentioned
+    - Malware families
+    - TTPs (tactics, techniques, procedures)
+    - Target sectors
+
+    Args:
+        article_text (str): The article content to analyze
+
+    Returns:
+        Optional[dict]: Dictionary containing analysis results with keys:
+            - summary: Brief summary of the article
+            - extracted_iocs: List of IOCs with value and type
+            - mentioned_actors: List of threat actors
+            - mentioned_malware: List of malware families
+            - identified_ttps: List of MITRE ATT&CK TTPs
+            - target_sectors: List of targeted sectors
+        Returns None if analysis fails.
+    """
+    if not article_text or not article_text.strip():
+        logger.warning("Empty or invalid article text provided for analysis")
+        return None
+
+    try:
+        llm_provider = get_llm_provider()
+        prompt = _create_article_analysis_prompt(article_text)
+
+        logger.info(f"Starting article analysis with {llm_provider} provider")
+
+        if llm_provider == "gemini":
+            result = await _analyze_article_with_gemini_async(prompt)
+        elif llm_provider == "ollama":
+            result = await _analyze_article_with_ollama_async(prompt)
+        else:
+            logger.error(f"Unknown LLM provider: {llm_provider}")
+            return None
+
+        if result is None:
+            logger.error("Article analysis failed - no valid result returned")
+            return None
+
+        # Validate that the result has the expected structure
+        required_keys = [
+            "summary",
+            "extracted_iocs",
+            "mentioned_actors",
+            "mentioned_malware",
+            "identified_ttps",
+            "target_sectors",
+        ]
+
+        for key in required_keys:
+            if key not in result:
+                logger.warning(f"Missing key '{key}' in analysis result, adding empty value")
+                if key == "summary":
+                    result[key] = "No summary available"
+                else:
+                    result[key] = []
+
+        logger.info("Article analysis completed successfully")
+        return result
+
+    except Exception as e:
+        logger.error(f"Error in article content analysis: {str(e)}")
+        return None
