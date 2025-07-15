@@ -113,32 +113,46 @@ def initialize_db():
             """
         CREATE TABLE IF NOT EXISTS threat_articles (
             article_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cve_id_association TEXT,
-            source_query TEXT,
             url TEXT UNIQUE NOT NULL,
             title TEXT,
             published_date TEXT,
             content_text TEXT,
-            content_highlights TEXT,
-            fetched_date TEXT,
-            gemini_summary TEXT,
-            extracted_iocs TEXT,
-            identified_ttps TEXT,
-            mentioned_actors TEXT,
-            FOREIGN KEY (cve_id_association) REFERENCES cves(cve_id)
+            highlights TEXT,
+            score REAL,
+            author TEXT,
+            source_query TEXT,
+            cve_id_association TEXT,
+            fetched_date TEXT NOT NULL,
+            analysis_status TEXT DEFAULT 'pending',
+            llm_summary TEXT,
+            llm_extracted_iocs TEXT,
+            llm_mentioned_actors TEXT,
+            llm_mentioned_malware TEXT,
+            llm_identified_ttps TEXT
         )
         """
         )
+
+        # Create indexes for better performance
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_threat_articles_url ON threat_articles(url)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_threat_articles_cve_id ON threat_articles(cve_id_association)")
 
         # Get existing columns for threat_articles table
         cursor.execute("PRAGMA table_info(threat_articles)")
         existing_articles_columns = [column[1] for column in cursor.fetchall()]
         logger.debug(f"Existing threat_articles columns: {existing_articles_columns}")
 
-        # Define expected columns for threat_articles table
+        # Define expected columns for threat_articles table to handle migration from old schema
         articles_column_definitions = {
-            "author": "TEXT",
+            "highlights": "TEXT",
             "score": "REAL",
+            "author": "TEXT",
+            "analysis_status": "TEXT DEFAULT 'pending'",
+            "llm_summary": "TEXT",
+            "llm_extracted_iocs": "TEXT",
+            "llm_mentioned_actors": "TEXT",
+            "llm_mentioned_malware": "TEXT",
+            "llm_identified_ttps": "TEXT",
         }
 
         # Add any missing columns to threat_articles table
@@ -1544,16 +1558,14 @@ def get_high_priority_cves():
             conn.close()
 
 
-def store_threat_articles(
-    articles_data: List[Dict], cve_id_association: Optional[str] = None, source_query: Optional[str] = None
-) -> int:
+def store_threat_articles(articles_data: list, source_query: str = None, cve_id_association: str = None) -> int:
     """
     Stores threat articles retrieved from EXA AI searches in the database.
 
     Args:
-        articles_data (List[Dict]): List of article dictionaries from EXA search
-        cve_id_association (Optional[str]): CVE ID if the search was for a specific CVE
-        source_query (Optional[str]): The query that led to these articles
+        articles_data (list): List of article dictionaries from EXA search
+        source_query (str, optional): The query that led to these articles
+        cve_id_association (str, optional): CVE ID if the search was for a specific CVE
 
     Returns:
         int: Number of newly inserted articles
@@ -1587,33 +1599,34 @@ def store_threat_articles(
                     continue
 
                 # Convert highlights list to JSON string
-                content_highlights = None
+                highlights_json = None
                 if highlights:
                     try:
-                        content_highlights = json.dumps(highlights)
+                        highlights_json = json.dumps(highlights)
                     except Exception as e:
                         logger.warning(f"Error serializing highlights for {url}: {str(e)}")
-                        content_highlights = str(highlights)
+                        highlights_json = str(highlights)
 
                 # Use INSERT OR IGNORE to avoid duplicates based on URL
                 cursor.execute(
                     """
                 INSERT OR IGNORE INTO threat_articles (
-                    cve_id_association, source_query, url, title, published_date,
-                    content_text, content_highlights, fetched_date, author, score
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    url, title, published_date, content_text, highlights, score,
+                    author, source_query, cve_id_association, fetched_date, analysis_status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
-                        cve_id_association,
-                        source_query,
                         url,
                         title,
                         published_date,
                         content_text,
-                        content_highlights,
-                        current_time,
-                        author,
+                        highlights_json,
                         score,
+                        author,
+                        source_query,
+                        cve_id_association,
+                        current_time,
+                        "pending",
                     ),
                 )
 
@@ -1735,12 +1748,15 @@ def get_articles_for_cve(cve_id: str) -> List[Dict]:
             conn.close()
 
 
-def get_articles_needing_analysis() -> List[Dict]:
+def get_articles_needing_analysis(limit: int = 20) -> list:
     """
-    Retrieves threat articles that need Gemini analysis (where gemini_summary is NULL).
+    Retrieves threat articles that are pending analysis (where analysis_status is 'pending').
+
+    Args:
+        limit (int): Maximum number of articles to return. Defaults to 20.
 
     Returns:
-        List[Dict]: List of article dictionaries that need analysis
+        list: List of article dictionaries that need analysis
     """
     conn = None
     try:
@@ -1751,12 +1767,13 @@ def get_articles_needing_analysis() -> List[Dict]:
         cursor.execute(
             """
         SELECT article_id, cve_id_association, source_query, url, title, published_date,
-               content_text, content_highlights, fetched_date, author, score
+               content_text, highlights, fetched_date, author, score, analysis_status
         FROM threat_articles
-        WHERE gemini_summary IS NULL
+        WHERE analysis_status = 'pending'
         ORDER BY fetched_date DESC
-        LIMIT 50
+        LIMIT ?
         """,
+            (limit,),
         )
 
         rows = cursor.fetchall()
@@ -1765,11 +1782,11 @@ def get_articles_needing_analysis() -> List[Dict]:
         for row in rows:
             # Parse highlights JSON
             highlights = []
-            if row["content_highlights"]:
+            if row["highlights"]:
                 try:
-                    highlights = json.loads(row["content_highlights"])
+                    highlights = json.loads(row["highlights"])
                 except json.JSONDecodeError:
-                    logger.warning(f"Invalid JSON in content_highlights for article {row['article_id']}")
+                    logger.warning(f"Invalid JSON in highlights for article {row['article_id']}")
 
             articles.append(
                 {
@@ -1780,10 +1797,11 @@ def get_articles_needing_analysis() -> List[Dict]:
                     "title": row["title"],
                     "published_date": row["published_date"],
                     "content_text": row["content_text"],
-                    "content_highlights": highlights,
+                    "highlights": highlights,
                     "fetched_date": row["fetched_date"],
                     "author": row["author"],
                     "score": row["score"],
+                    "analysis_status": row["analysis_status"],
                 }
             )
 
@@ -1885,6 +1903,90 @@ def get_all_threat_articles(limit: Optional[int] = None) -> List[Dict]:
     except sqlite3.Error as e:
         logger.error(f"Database error while fetching all threat articles: {str(e)}")
         return []
+    finally:
+        if conn:
+            conn.close()
+
+
+def update_article_with_analysis(article_id: int, analysis_data: dict) -> bool:
+    """
+    Updates a threat article with LLM analysis results.
+
+    Args:
+        article_id (int): The article ID to update
+        analysis_data (dict): Dictionary containing analysis results with keys:
+            - summary: Brief summary of the article
+            - extracted_iocs: List of IOCs with value and type
+            - mentioned_actors: List of threat actors
+            - mentioned_malware: List of malware families
+            - identified_ttps: List of MITRE ATT&CK TTPs
+            - target_sectors: List of targeted sectors
+
+    Returns:
+        bool: True if the update was successful, False otherwise
+    """
+    if not analysis_data:
+        logger.warning("No analysis data provided for article update")
+        return False
+
+    conn = None
+    try:
+        conn = sqlite3.connect(get_db_file_name())
+        cursor = conn.cursor()
+
+        # Extract data from analysis results
+        summary = analysis_data.get("summary", "")
+        extracted_iocs = analysis_data.get("extracted_iocs", [])
+        mentioned_actors = analysis_data.get("mentioned_actors", [])
+        mentioned_malware = analysis_data.get("mentioned_malware", [])
+        identified_ttps = analysis_data.get("identified_ttps", [])
+
+        # Convert lists to JSON strings for storage
+        try:
+            extracted_iocs_json = json.dumps(extracted_iocs) if extracted_iocs else None
+            mentioned_actors_json = json.dumps(mentioned_actors) if mentioned_actors else None
+            mentioned_malware_json = json.dumps(mentioned_malware) if mentioned_malware else None
+            identified_ttps_json = json.dumps(identified_ttps) if identified_ttps else None
+        except Exception as e:
+            logger.error(f"Error serializing analysis data to JSON for article {article_id}: {str(e)}")
+            return False
+
+        # Update the article with analysis results
+        cursor.execute(
+            """
+            UPDATE threat_articles
+            SET llm_summary = ?,
+                llm_extracted_iocs = ?,
+                llm_mentioned_actors = ?,
+                llm_mentioned_malware = ?,
+                llm_identified_ttps = ?,
+                analysis_status = 'completed'
+            WHERE article_id = ?
+            """,
+            (
+                summary,
+                extracted_iocs_json,
+                mentioned_actors_json,
+                mentioned_malware_json,
+                identified_ttps_json,
+                article_id,
+            ),
+        )
+
+        if cursor.rowcount == 0:
+            logger.warning(f"No article found with ID {article_id} for analysis update")
+            return False
+
+        conn.commit()
+        logger.debug(f"Successfully updated article {article_id} with analysis results")
+        return True
+
+    except sqlite3.Error as e:
+        logger.error(f"Database error while updating article {article_id} with analysis: {str(e)}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error updating article {article_id} with analysis: {str(e)}")
+        return False
     finally:
         if conn:
             conn.close()

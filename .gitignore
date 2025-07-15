@@ -36,7 +36,7 @@ Thumbs.db
 # Environment and secret files
 .env
 secrets.json
-
+CLAUDE.md
 # IDE files
 .idea/
 .vscode/

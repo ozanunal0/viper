@@ -19,7 +19,7 @@ from src.clients.microsoft_update_client import (
     fetch_patch_tuesday_data,
 )
 from src.clients.nvd_client import fetch_recent_cves
-from src.llm_analyzer import analyze_cve_async
+from src.llm_analyzer import analyze_article_content_async, analyze_cve_async
 from src.risk_analyzer import analyze_cve_risk, calculate_combined_risk_score, generate_alerts
 
 # Import configuration getters
@@ -46,6 +46,7 @@ from src.utils.database_handler import (
     initialize_db,
     store_cves,
     store_threat_articles,
+    update_article_with_analysis,
     update_cve_epss_data,
     update_cve_exploit_data,
     update_cve_kev_status,
@@ -641,6 +642,103 @@ async def perform_semantic_searches(cve_list_for_context=None, general_queries=N
     return total_articles_stored
 
 
+async def process_single_article_async(article, semaphore):
+    """
+    Process a single article with LLM analysis and update the database.
+
+    Args:
+        article (dict): The article to process
+        semaphore (asyncio.Semaphore): Semaphore for rate limiting
+
+    Returns:
+        tuple: (article_id, success) for status reporting
+    """
+    article_id = article.get("article_id")
+    try:
+        async with semaphore:
+            logger.info(f"Processing article: {article_id}")
+
+            # Get article content
+            content_text = article.get("content_text", "")
+            if not content_text or not content_text.strip():
+                logger.warning(f"Article {article_id} has no content text")
+                return article_id, False
+
+            # Analyze the article content asynchronously
+            analysis_result = await analyze_article_content_async(content_text)
+
+            if analysis_result is None:
+                logger.error(f"Failed to analyze article {article_id}")
+                return article_id, False
+
+            # Update the database with the analysis results
+            success = update_article_with_analysis(article_id, analysis_result)
+
+            if success:
+                logger.info(f"Successfully processed article {article_id}")
+                return article_id, True
+            else:
+                logger.error(f"Failed to update database for article {article_id}")
+                return article_id, False
+
+    except Exception as e:
+        logger.error(f"Error processing article {article_id}: {str(e)}")
+        return article_id, False
+
+
+async def process_unanalysed_articles_async():
+    """
+    Processes unanalyzed articles by analyzing their content with LLM and updating the database.
+
+    Returns:
+        int: Number of articles successfully analyzed
+    """
+    logger.info("Starting article analysis process")
+
+    # Get articles that need analysis
+    articles = get_articles_needing_analysis(limit=20)  # Process up to 20 articles at a time
+
+    if not articles:
+        logger.info("No articles need analysis")
+        return 0
+
+    logger.info(f"Found {len(articles)} articles needing analysis")
+
+    # Get the concurrency limit from config (reuse Gemini concurrent requests setting)
+    concurrency_limit = get_gemini_concurrent_requests()
+    logger.info(f"Using concurrency limit of {concurrency_limit} for article analysis")
+
+    # Create a semaphore to limit concurrent LLM API calls
+    semaphore = asyncio.Semaphore(concurrency_limit)
+
+    # Create a task for each article
+    tasks = [process_single_article_async(article, semaphore) for article in articles]
+
+    logger.info(f"Starting concurrent analysis of {len(tasks)} articles")
+    start_time = time.time()
+
+    # Execute all tasks concurrently
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Count successes and log any failures
+    success_count = 0
+    for result in results:
+        if isinstance(result, Exception):
+            logger.error(f"Article analysis task failed with exception: {result}")
+        else:
+            article_id, success = result
+            if success:
+                success_count += 1
+            else:
+                logger.warning(f"Failed to analyze article {article_id}")
+
+    elapsed_time = time.time() - start_time
+    logger.info(f"Completed concurrent analysis of {len(tasks)} articles in {elapsed_time:.2f} seconds")
+    logger.info(f"Successfully analyzed {success_count} out of {len(tasks)} articles")
+
+    return success_count
+
+
 def run_cti_feed(days_back=None, scan_all_exploits=False, max_cves_for_exploit_scan=None):
     """
     Runs the full CTI feed workflow:
@@ -788,6 +886,15 @@ def run_cti_feed(days_back=None, scan_all_exploits=False, max_cves_for_exploit_s
             if articles_stored > 0:
                 print(f"\nStored {articles_stored} threat intelligence articles from semantic searches.")
 
+            # Step 12: Analyze stored articles with LLM
+            logger.info("Analyzing stored threat intelligence articles")
+            print("\nAnalyzing stored threat intelligence articles...")
+
+            analyzed_articles_count = asyncio.run(process_unanalysed_articles_async())
+
+            if analyzed_articles_count > 0:
+                print(f"\nSuccessfully analyzed {analyzed_articles_count} threat intelligence articles.")
+
             print(f"\n{'=' * 80}")
             print(f"FOUND {len(priority_cves)} HIGH/MEDIUM PRIORITY CVes")
             print(f"{'=' * 80}")
@@ -795,7 +902,7 @@ def run_cti_feed(days_back=None, scan_all_exploits=False, max_cves_for_exploit_s
             for cve in priority_cves:
                 display_cve(cve)
 
-            # Step 12: Display CVes with alerts
+            # Step 13: Display CVes with alerts
             if cves_with_alerts_count > 0:
                 logger.info("Retrieving and displaying CVes with alerts")
                 cves_with_alerts = get_cves_with_alerts()
