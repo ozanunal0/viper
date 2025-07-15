@@ -23,15 +23,17 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
 
 from src.clients.cisa_kev_client import fetch_kev_catalog
 from src.clients.epss_client import get_epss_score
+from src.clients.exa_client import is_exa_client_available, search_cve_related_content
 from src.clients.exploit_search_client import find_public_exploits, search_exploit_db, search_github
 from src.clients.nvd_client import fetch_single_cve_details
-from src.llm_analyzer import analyze_cve_async
+from src.llm_analyzer import analyze_article_content_async, analyze_cve_async
 from src.risk_analyzer import analyze_cve_risk
 from src.utils.config import get_db_file_name, get_llm_provider
 from src.utils.database_handler import (
     get_cve_details,
     store_cves,
     store_or_update_cve,
+    store_threat_articles,
     update_cve_epss_data,
     update_cve_exploit_data,
     update_cve_kev_status,
@@ -409,6 +411,10 @@ if lookup_button and cve_id:
                 if use_github or use_exploitdb:
                     tab_names.append("Search Exploits")
 
+                # Add threat intelligence tab if EXA AI is available
+                if is_exa_client_available():
+                    tab_names.append("Threat Intelligence")
+
                 tabs = st.tabs(tab_names)
 
                 # Tab for manual analysis
@@ -538,6 +544,111 @@ if lookup_button and cve_id:
                                             st.error("Failed to save exploit data to database")
                             except Exception as e:
                                 st.error(f"Error searching for exploits: {str(e)}")
+
+                # Tab for threat intelligence if EXA AI is available
+                if is_exa_client_available():
+                    # Determine which tab index to use based on whether exploit search tab exists
+                    threat_intel_tab_index = 3 if (use_github or use_exploitdb) else 2
+
+                    with tabs[threat_intel_tab_index]:
+                        st.markdown("### 🌐 External Threat Intelligence Analysis")
+                        st.info(
+                            "Perform on-demand semantic search and analysis of external threat intelligence sources."
+                        )
+
+                        if st.button(
+                            "🔍 Search & Analyze Threat Intelligence", type="primary", key="local_threat_intel"
+                        ):
+                            analyzed_articles_local = []
+                            try:
+                                # Since Streamlit is sync, we run our async functions using asyncio.run()
+                                with st.spinner("Performing semantic search with EXA AI..."):
+                                    # Step 1: Search for related content
+                                    articles = asyncio.run(
+                                        search_cve_related_content(cve_id, num_results=5)
+                                    )  # More results for local analysis
+
+                                if articles:
+                                    st.success(
+                                        f"Found {len(articles)} potentially relevant articles. Analyzing with your configured LLM..."
+                                    )
+
+                                    # Step 2: Analyze each article
+                                    # Using st.progress for a better user experience
+                                    progress_bar = st.progress(
+                                        0, text="Analyzing content... (This may take a few minutes)"
+                                    )
+                                    for i, article in enumerate(articles):
+                                        analysis_result = asyncio.run(
+                                            analyze_article_content_async(article.get("text", ""))
+                                        )
+                                        if analysis_result:
+                                            # Combine original article data with analysis results
+                                            article.update(analysis_result)
+                                            analyzed_articles_local.append(article)
+
+                                        # Update progress bar
+                                        progress_bar.progress(
+                                            (i + 1) / len(articles), text=f"Analyzing article {i+1}/{len(articles)}..."
+                                        )
+
+                                    progress_bar.empty()  # Remove progress bar when done
+                                    st.info(f"Successfully analyzed {len(analyzed_articles_local)} articles.")
+
+                                    # Save the analyzed articles to the database
+                                    if analyzed_articles_local:
+                                        try:
+                                            saved_count = store_threat_articles(
+                                                analyzed_articles_local,
+                                                source_query=f"CVE-related content for {cve_id}",
+                                                cve_id_association=cve_id,
+                                            )
+                                            if saved_count > 0:
+                                                st.success(
+                                                    f"💾 Saved {saved_count} analyzed articles to database for future reference."
+                                                )
+                                            else:
+                                                st.info("📝 Articles were already in the database.")
+                                        except Exception as save_error:
+                                            st.warning(f"Could not save articles to database: {str(save_error)}")
+
+                                else:
+                                    st.warning("No relevant external articles found by EXA AI for this CVE.")
+
+                            except Exception as e:
+                                st.error(f"An error occurred during threat intelligence gathering: {e}")
+
+                            # Step 3: Display the results
+                            if analyzed_articles_local:
+                                st.markdown("### 📊 Threat Intelligence Analysis Results")
+
+                                for article in analyzed_articles_local:
+                                    with st.expander(f"📄 **{article.get('title', 'Untitled')}**"):
+                                        st.markdown(f"**Source:** [{article.get('url')}]({article.get('url')})")
+
+                                        st.info(f"**AI Summary:**\n{article.get('summary', 'Not available.')}")
+
+                                        col1, col2 = st.columns(2)
+
+                                        with col1:
+                                            st.write("**Mentioned Actors:**")
+                                            st.json(article.get("mentioned_actors", []))
+                                            st.write("**Mentioned Malware:**")
+                                            st.json(article.get("mentioned_malware", []))
+
+                                        with col2:
+                                            st.write("**Identified TTPs:**")
+                                            st.json(article.get("identified_ttps", []))
+                                            st.write("**Target Sectors:**")
+                                            st.json(article.get("target_sectors", []))
+
+                                        st.write("**Extracted IOCs:**")
+                                        # Use st.dataframe for better presentation of IOCs
+                                        iocs_df = pd.DataFrame(article.get("extracted_iocs", []))
+                                        if not iocs_df.empty:
+                                            st.dataframe(iocs_df, use_container_width=True, hide_index=True)
+                                        else:
+                                            st.write("No IOCs extracted.")
 
             else:
                 # Not in local database, fetch from external sources
@@ -677,6 +788,98 @@ if lookup_button and cve_id:
                     # Display detailed results
                     st.markdown("## Analysis Results")
                     display_cve_details(nvd_data, source="Live Data")
+
+                    # --- On-Demand External Threat Intelligence Workflow ---
+                    if is_exa_client_available():
+                        st.markdown("---")
+                        st.subheader("🌐 Live External Threat Intelligence Analysis")
+
+                        analyzed_articles_live = []
+                        try:
+                            # Since Streamlit is sync, we run our async functions using asyncio.run()
+                            with st.spinner("Performing live semantic search with EXA AI..."):
+                                # Step 1: Search for related content
+                                articles = asyncio.run(
+                                    search_cve_related_content(cve_id, num_results=3)
+                                )  # Limit to 3 for faster live analysis
+
+                            if articles:
+                                st.success(
+                                    f"Found {len(articles)} potentially relevant articles. Analyzing with your configured LLM..."
+                                )
+
+                                # Step 2: Analyze each article
+                                # Using st.progress for a better user experience
+                                progress_bar = st.progress(0, text="Analyzing content... (This may take a moment)")
+                                for i, article in enumerate(articles):
+                                    analysis_result = asyncio.run(
+                                        analyze_article_content_async(article.get("text", ""))
+                                    )
+                                    if analysis_result:
+                                        # Combine original article data with analysis results
+                                        article.update(analysis_result)
+                                        analyzed_articles_live.append(article)
+
+                                    # Update progress bar
+                                    progress_bar.progress(
+                                        (i + 1) / len(articles), text=f"Analyzing article {i+1}/{len(articles)}..."
+                                    )
+
+                                progress_bar.empty()  # Remove progress bar when done
+                                st.info(f"Successfully analyzed {len(analyzed_articles_live)} articles.")
+
+                                # Save the analyzed articles to the database
+                                if analyzed_articles_live:
+                                    try:
+                                        saved_count = store_threat_articles(
+                                            analyzed_articles_live,
+                                            source_query=f"CVE-related content for {cve_id}",
+                                            cve_id_association=cve_id,
+                                        )
+                                        if saved_count > 0:
+                                            st.success(
+                                                f"💾 Saved {saved_count} analyzed articles to database for future reference."
+                                            )
+                                        else:
+                                            st.info("📝 Articles were already in the database.")
+                                    except Exception as save_error:
+                                        st.warning(f"Could not save articles to database: {str(save_error)}")
+
+                            else:
+                                st.warning("No relevant external articles found by EXA AI for this CVE.")
+
+                        except Exception as e:
+                            st.error(f"An error occurred during live threat intelligence gathering: {e}")
+
+                        # Step 3: Display the results
+                        if analyzed_articles_live:
+                            for article in analyzed_articles_live:
+                                with st.expander(f"📄 **{article.get('title', 'Untitled')}**"):
+                                    st.markdown(f"**Source:** [{article.get('url')}]({article.get('url')})")
+
+                                    st.info(f"**AI Summary:**\n{article.get('summary', 'Not available.')}")
+
+                                    col1, col2 = st.columns(2)
+
+                                    with col1:
+                                        st.write("**Mentioned Actors:**")
+                                        st.json(article.get("mentioned_actors", []))
+                                        st.write("**Mentioned Malware:**")
+                                        st.json(article.get("mentioned_malware", []))
+
+                                    with col2:
+                                        st.write("**Identified TTPs:**")
+                                        st.json(article.get("identified_ttps", []))
+                                        st.write("**Target Sectors:**")
+                                        st.json(article.get("target_sectors", []))
+
+                                    st.write("**Extracted IOCs:**")
+                                    # Use st.dataframe for better presentation of IOCs
+                                    iocs_df = pd.DataFrame(article.get("extracted_iocs", []))
+                                    if not iocs_df.empty:
+                                        st.dataframe(iocs_df, use_container_width=True, hide_index=True)
+                                    else:
+                                        st.write("No IOCs extracted.")
 
                     st.info("💾 You can now save this CVE to your database")
                 else:
