@@ -20,6 +20,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
 from src.clients.nvd_client import fetch_single_cve_details
 from src.utils.database_handler import (
     get_all_cves_with_details,
+    get_articles_for_cve,
     get_cve_details,
     get_filtered_cves,
     update_cve_exploit_data,
@@ -263,6 +264,142 @@ if alerts:
         st.markdown("### Alerts and Concerns")
         for alert in other_alerts:
             st.warning(alert)
+
+# External Threat Intelligence section
+st.markdown("---")
+
+# Fetch analyzed articles for this CVE
+try:
+    threat_articles = get_articles_for_cve(selected_cve)
+
+    if threat_articles:
+        st.subheader("🌐 External Threat Intelligence Analysis")
+        st.markdown(
+            f"Found {len(threat_articles)} analyzed threat intelligence article(s) related to this vulnerability:"
+        )
+
+        # Loop through each article
+        for article in threat_articles:
+            title = article.get("title", "Unknown Title")
+            url = article.get("url", "#")
+
+            # Create an expander for each article
+            with st.expander(f"📄 {title}"):
+                # Display the source URL
+                st.markdown(f"**Source:** [View Original Article]({url})")
+
+                # AI Summary
+                summary = article.get("llm_summary", "No summary available.")
+                if summary and summary.strip():
+                    st.info(f"**AI Summary:** {summary}")
+
+                # Create columns for better layout
+                col1, col2 = st.columns(2)
+
+                # Column 1: Actors & Malware
+                with col1:
+                    st.write("**Mentioned Threat Actors:**")
+                    try:
+                        actors_json = article.get("llm_mentioned_actors", "[]")
+                        if actors_json:
+                            actors = json.loads(actors_json) if isinstance(actors_json, str) else actors_json
+                            if actors and len(actors) > 0:
+                                # Convert to DataFrame if it's a simple list
+                                if isinstance(actors, list) and all(isinstance(x, str) for x in actors):
+                                    actors_df = pd.DataFrame(actors, columns=["Threat Actor"])
+                                else:
+                                    actors_df = pd.DataFrame(actors)
+                                col1.dataframe(actors_df, hide_index=True, use_container_width=True)
+                            else:
+                                col1.write("*No threat actors mentioned*")
+                        else:
+                            col1.write("*No threat actors mentioned*")
+                    except (json.JSONDecodeError, Exception) as e:
+                        col1.write("*Error parsing threat actor data*")
+
+                    st.write("")  # Add some spacing
+
+                    st.write("**Mentioned Malware:**")
+                    try:
+                        malware_json = article.get("llm_mentioned_malware", "[]")
+                        if malware_json:
+                            malware = json.loads(malware_json) if isinstance(malware_json, str) else malware_json
+                            if malware and len(malware) > 0:
+                                # Convert to DataFrame if it's a simple list
+                                if isinstance(malware, list) and all(isinstance(x, str) for x in malware):
+                                    malware_df = pd.DataFrame(malware, columns=["Malware Family"])
+                                else:
+                                    malware_df = pd.DataFrame(malware)
+                                col1.dataframe(malware_df, hide_index=True, use_container_width=True)
+                            else:
+                                col1.write("*No malware families mentioned*")
+                        else:
+                            col1.write("*No malware families mentioned*")
+                    except (json.JSONDecodeError, Exception) as e:
+                        col1.write("*Error parsing malware data*")
+
+                # Column 2: TTPs & IOCs
+                with col2:
+                    st.write("**Identified TTPs (MITRE ATT&CK):**")
+                    try:
+                        ttps_json = article.get("llm_identified_ttps", "[]")
+                        if ttps_json:
+                            ttps = json.loads(ttps_json) if isinstance(ttps_json, str) else ttps_json
+                            if ttps and len(ttps) > 0:
+                                # Convert to DataFrame if it's a simple list
+                                if isinstance(ttps, list) and all(isinstance(x, str) for x in ttps):
+                                    ttps_df = pd.DataFrame(ttps, columns=["TTP ID"])
+                                else:
+                                    ttps_df = pd.DataFrame(ttps)
+                                col2.dataframe(ttps_df, hide_index=True, use_container_width=True)
+                            else:
+                                col2.write("*No TTPs identified*")
+                        else:
+                            col2.write("*No TTPs identified*")
+                    except (json.JSONDecodeError, Exception) as e:
+                        col2.write("*Error parsing TTP data*")
+
+                    st.write("")  # Add some spacing
+
+                    st.write("**Extracted IOCs:**")
+                    try:
+                        iocs_json = article.get("llm_extracted_iocs", "[]")
+                        if iocs_json:
+                            iocs = json.loads(iocs_json) if isinstance(iocs_json, str) else iocs_json
+                            if iocs and len(iocs) > 0:
+                                # IOCs should be a list of dictionaries with 'value' and 'type'
+                                if isinstance(iocs, list) and len(iocs) > 0:
+                                    iocs_df = pd.DataFrame(iocs)
+                                    col2.dataframe(iocs_df, hide_index=True, use_container_width=True)
+                                else:
+                                    col2.write("*No IOCs extracted*")
+                            else:
+                                col2.write("*No IOCs extracted*")
+                        else:
+                            col2.write("*No IOCs extracted*")
+                    except (json.JSONDecodeError, Exception) as e:
+                        col2.write("*Error parsing IOC data*")
+
+                # Add article metadata at the bottom
+                fetched_date = article.get("fetched_date", "Unknown")
+                if fetched_date != "Unknown":
+                    try:
+                        fetched_dt = datetime.fromisoformat(fetched_date.replace("Z", "+00:00"))
+                        fetched_date = fetched_dt.strftime("%Y-%m-%d %H:%M")
+                    except (ValueError, TypeError):
+                        pass
+
+                st.caption(f"Article fetched: {fetched_date}")
+
+    else:
+        # Only show this message if the user specifically searched for a CVE
+        if cve_search and re.match(r"^CVE-\d{4}-\d+$", cve_search):
+            st.info(
+                "🔍 No external threat intelligence articles found for this CVE. Articles are fetched for HIGH and MEDIUM priority vulnerabilities during the regular analysis workflow."
+            )
+
+except Exception as e:
+    st.error(f"Error loading threat intelligence data: {str(e)}")
 
 # Technical Details section
 st.markdown("---")
