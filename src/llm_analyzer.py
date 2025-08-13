@@ -10,6 +10,7 @@ from typing import Optional, Tuple, Union
 
 import aiohttp
 import google.generativeai as genai
+from openai import AsyncOpenAI
 from google.api_core import exceptions as google_exceptions
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
@@ -19,6 +20,9 @@ from src.utils.config import (
     get_llm_provider,
     get_local_llm_model_name,
     get_ollama_api_base_url,
+    get_openai_api_key,
+    get_openai_model_name,
+    get_openai_base_url,
     get_retry_max_attempts,
     get_retry_wait_max_seconds,
     get_retry_wait_min_seconds,
@@ -319,6 +323,20 @@ JUSTIFICATION: [Brief explanation of your reasoning]
     return prompt
 
 
+def _create_openai_prompt(cve_data: dict) -> str:
+    """
+    Creates a prompt optimized for OpenAI models. Reuse Ollama prompt format for
+    consistent PRIORITY/JUSTIFICATION parsing.
+
+    Args:
+        cve_data (dict): CVE information dictionary
+
+    Returns:
+        str: Formatted prompt for OpenAI
+    """
+    return _create_ollama_prompt(cve_data)
+
+
 @retry(
     retry=retry_if_exception_type(
         (
@@ -384,6 +402,45 @@ Priority:
     return prompt
 
 
+@retry(
+    retry=retry_if_exception_type(Exception),
+    wait=wait_exponential(
+        multiplier=get_retry_wait_multiplier(),
+        min=get_retry_wait_min_seconds(),
+        max=get_retry_wait_max_seconds(),
+    ),
+    stop=stop_after_attempt(get_retry_max_attempts()),
+)
+async def _analyze_with_openai_async(cve_data) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Analyzes a CVE using the OpenAI Chat Completions API.
+
+    Returns:
+        tuple: (priority, justification, raw_response)
+    """
+    client = AsyncOpenAI(api_key=get_openai_api_key(), base_url=get_openai_base_url())
+    model = get_openai_model_name()
+    prompt = _create_openai_prompt(cve_data)
+    cve_id = cve_data.get("cve_id", "Unknown CVE")
+
+    logger.info(f"Sending CVE {cve_id} to OpenAI ({model}) for analysis")
+    response = await client.chat.completions.create(
+        model=model,
+        temperature=0.1,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    raw_response = (response.choices[0].message.content or "").strip()
+    if not raw_response:
+        error_msg = "Empty response from OpenAI"
+        logger.error(error_msg)
+        return "ERROR_ANALYZING", None, error_msg
+
+    priority, justification = _parse_ollama_response(raw_response)
+    logger.info(f"OpenAI assigned {priority} priority to {cve_id}")
+    return priority, justification, raw_response
+
+
 async def analyze_cve_async(cve_data):
     """
     Asynchronously analyzes a CVE using the configured LLM provider to determine its priority.
@@ -406,6 +463,8 @@ async def analyze_cve_async(cve_data):
         elif llm_provider == "ollama":
             prompt = _create_ollama_prompt(cve_data)
             return await _analyze_with_ollama_async(prompt, cve_id)
+        elif llm_provider == "openai":
+            return await _analyze_with_openai_async(cve_data)
         else:
             error_msg = f"Unknown LLM provider: {llm_provider}"
             logger.error(error_msg)
@@ -768,6 +827,38 @@ async def _analyze_article_with_ollama_async(prompt: str) -> Optional[dict]:
         return None
 
 
+@retry(
+    retry=retry_if_exception_type(Exception),
+    wait=wait_exponential(
+        multiplier=get_retry_wait_multiplier(),
+        min=get_retry_wait_min_seconds(),
+        max=get_retry_wait_max_seconds(),
+    ),
+    stop=stop_after_attempt(get_retry_max_attempts()),
+)
+async def _analyze_article_with_openai_async(prompt: str) -> Optional[dict]:
+    """
+    Analyzes article content using OpenAI API and returns structured JSON.
+    """
+    client = AsyncOpenAI(api_key=get_openai_api_key(), base_url=get_openai_base_url())
+    model = get_openai_model_name()
+    logger.info("Sending article to OpenAI for analysis")
+    response = await client.chat.completions.create(
+        model=model,
+        temperature=0.1,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw_response = (response.choices[0].message.content or "").strip()
+    cleaned_response = _clean_json_response(raw_response)
+    if not cleaned_response:
+        logger.error("Failed to extract JSON from OpenAI response")
+        return None
+    try:
+        return json.loads(cleaned_response)
+    except json.JSONDecodeError:
+        logger.error("Failed to parse JSON from OpenAI response")
+        return None
+
 async def analyze_article_content_async(article_text: str) -> Optional[dict]:
     """
     Analyzes cybersecurity article content to extract threat intelligence information.
@@ -807,6 +898,8 @@ async def analyze_article_content_async(article_text: str) -> Optional[dict]:
             result = await _analyze_article_with_gemini_async(prompt)
         elif llm_provider == "ollama":
             result = await _analyze_article_with_ollama_async(prompt)
+        elif llm_provider == "openai":
+            result = await _analyze_article_with_openai_async(prompt)
         else:
             logger.error(f"Unknown LLM provider: {llm_provider}")
             return None

@@ -67,7 +67,14 @@ with refresh_col:
 st.sidebar.header("About this Tool")
 # Get current LLM provider for dynamic UI
 current_llm_provider = get_llm_provider()
-llm_display_name = "Gemini AI" if current_llm_provider == "gemini" else f"Local LLM ({current_llm_provider.title()})"
+if current_llm_provider == "gemini":
+    llm_display_name = "Gemini AI"
+elif current_llm_provider == "ollama":
+    llm_display_name = "Local LLM (Ollama)"
+elif current_llm_provider == "openai":
+    llm_display_name = "OpenAI GPT"
+else:
+    llm_display_name = "Unknown Provider"
 
 st.sidebar.markdown(
     f"""
@@ -79,7 +86,7 @@ This tool allows you to look up information about a specific CVE (Common Vulnera
 4. Analyze the vulnerability with {llm_display_name}
 5. Save the results to your local database
 
-**Current LLM Provider**: {current_llm_provider.title()}
+**Current LLM Provider**: {llm_display_name}
 """
 )
 

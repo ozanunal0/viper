@@ -18,3 +18,4 @@ pillow>=9.0.0
 pyyaml>=6.0
 exa-py>=1.14.0
 tenacity>=8.2.0
+openai>=1.40.0

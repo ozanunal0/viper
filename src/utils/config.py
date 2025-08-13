@@ -735,7 +735,7 @@ def get_llm_provider(default="gemini"):
         return default.lower()
 
     # Validate provider
-    valid_providers = ["gemini", "ollama"]
+    valid_providers = ["gemini", "ollama", "openai"]
     if provider not in valid_providers:
         logger.warning(f"Invalid LLM_PROVIDER '{provider}'. Must be one of {valid_providers}. Using default: {default}")
         return default.lower()
@@ -787,3 +787,22 @@ def get_local_llm_model_name(default="llama3:8b"):
 
     logger.info(f"Using local LLM model: {model_name}")
     return model_name
+
+
+def get_openai_api_key():
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        logger.error("OPENAI_API_KEY not found in environment variables")
+        raise ValueError("OPENAI_API_KEY not found. Please add it to your .env file")
+    return api_key
+
+def get_openai_model_name(default="gpt-4o-mini"):
+    name = os.getenv("OPENAI_MODEL_NAME", "").strip()
+    if not name:
+        logger.warning(f"OPENAI_MODEL_NAME not found. Using default: {default}")
+        return default
+    return name
+
+def get_openai_base_url(default="https://api.openai.com/v1"):
+    url = os.getenv("OPENAI_BASE_URL", "").strip()
+    return url or default
