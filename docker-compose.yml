@@ -19,6 +19,9 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - OLLAMA_API_BASE_URL=${OLLAMA_API_BASE_URL:-http://ollama:11434}
       - LOCAL_LLM_MODEL_NAME=${LOCAL_LLM_MODEL_NAME:-llama3:8b}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL_NAME=${OPENAI_MODEL_NAME:-gpt-4o-mini}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
       # Other API keys and configuration
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - EXPLOIT_DB_API_URL=${EXPLOIT_DB_API_URL:-}

@@ -73,6 +73,7 @@ cp env.example .env
 # Edit .env with your settings:
 # - GEMINI_API_KEY for Gemini AI (default provider)
 # - Or set LLM_PROVIDER=ollama for local LLM
+# - Or set LLM_PROVIDER=openai and provide OPENAI_API_KEY (+ optional OPENAI_MODEL_NAME)
 ```
 
 ### 3. Claude Desktop MCP
@@ -154,10 +155,23 @@ OLLAMA_API_BASE_URL=http://localhost:11434  # or http://ollama:11434 in Docker
 LOCAL_LLM_MODEL_NAME=llama3:8b
 ```
 
+## ☁️ Cloud LLM with OpenAI
+
+Use OpenAI GPT models as the provider for AI analysis.
+
+### Configuration
+```bash
+# In .env file
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL_NAME=gpt-4o-mini
+# OPENAI_BASE_URL=https://api.openai.com/v1  # optional override
+```
+
 ## ✨ Features
 
 - **Multi-source data**: NVD, EPSS, CISA KEV, Microsoft
-- **Flexible AI analysis**: Choose between Gemini AI or local Ollama models
+- **Flexible AI analysis**: Choose between Gemini AI, OpenAI GPT, or local Ollama models
 - **Risk scoring**: Weighted multi-factor scoring
 - **Live lookup**: Real-time CVE analysis
 - **Multiple interfaces**: Dashboard, CLI, Claude Desktop
